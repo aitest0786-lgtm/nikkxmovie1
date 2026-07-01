@@ -1,3 +1,17 @@
 {
-  "type": "module"
+  "name": "movies4u-proxy",
+  "version": "1.0.0",
+  "description": "Proxy and masked movie portal for movies4u.pn",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "dependencies": {
+    "axios": "^1.7.2",
+    "cheerio": "^1.0.0-rc.12",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2"
+  }
 }
