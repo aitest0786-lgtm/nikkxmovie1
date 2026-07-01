@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>nikkXmovie - Premium Movie & Anime Portal</title>
+  <!-- Google Fonts: Outfit & Inter -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
+  <!-- FontAwesome Icons -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <!-- Background Glow FX -->
+  <div class="bg-glow bg-glow-1"></div>
+  <div class="bg-glow bg-glow-2"></div>
+
+  <!-- Header Section -->
+  <header>
+    <div class="nav-container">
+      <div class="logo">
+        <i class="fa-solid fa-play-css-neon fa-play"></i>
+        <span>nikk<span class="x-brand">X</span><span>movie</span></span>
+      </div>
+
+      <!-- Search Bar -->
+      <div class="search-box">
+        <input type="text" id="search-input" placeholder="Search movies, anime, series...">
+        <button id="search-btn" aria-label="Search"><i class="fa-solid fa-magnifying-glass"></i></button>
+      </div>
+
+      <!-- User Actions / Status -->
+      <div class="user-status" style="display: flex; gap: 15px; align-items: center; flex-wrap: wrap;">
+        <a href="https://t.me/nikkgill" target="_blank" class="tg-nav-btn"><i class="fa-brands fa-telegram"></i> Telegram @nikkgill</a>
+        <span class="badge"><i class="fa-solid fa-circle"></i> Online Portal</span>
+      </div>
+    </div>
+  </header>
+
+  <!-- Categories / Genres Navigation -->
+  <nav class="categories-bar">
+    <div class="nav-links">
+      <button class="cat-btn active" data-category="">Home</button>
+      <button class="cat-btn" data-category="bollywood">Bollywood</button>
+      <button class="cat-btn" data-category="hollywood">Hollywood</button>
+      <button class="cat-btn" data-category="dual-audio">Dual Audio</button>
+      <button class="cat-btn" data-category="web-series">Web Series</button>
+      <button class="cat-btn" data-category="tv-show">TV Show</button>
+      <button class="cat-btn" data-category="south-indian">South Indian</button>
+      <button class="cat-btn" data-category="18">18+</button>
+    </div>
+  </nav>
+
+  <!-- Main Container -->
+  <main class="main-content">
+    
+    <!-- Hero Slider / Featured Movie Card -->
+    <section class="hero-section" id="hero-banner">
+      <div class="hero-overlay"></div>
+      <div class="hero-content">
+        <span class="featured-tag"><i class="fa-solid fa-fire"></i> Featured Release</span>
+        <h1 id="featured-title">Explore Premium Cinema & Anime</h1>
+        <p id="featured-desc">Stream and download the latest high-quality Bollywood, Hollywood, South Indian movies, and Web series. Zero redirects on searches, hidden origin links, absolute privacy.</p>
+        <div class="hero-actions">
+          <button class="btn btn-primary" id="featured-view-btn"><i class="fa-solid fa-circle-info"></i> More Details</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Movies Listing Grid -->
+    <section class="movies-section">
+      <div class="section-header">
+        <h2 id="section-title"><i class="fa-solid fa-clapperboard"></i> Latest Uploads</h2>
+      </div>
+
+      <!-- Skeleton Loaders -->
+      <div class="skeleton-grid" id="skeleton-loader">
+        <div class="skeleton-card"></div>
+        <div class="skeleton-card"></div>
+        <div class="skeleton-card"></div>
+        <div class="skeleton-card"></div>
+        <div class="skeleton-card"></div>
+        <div class="skeleton-card"></div>
+        <div class="skeleton-card"></div>
+        <div class="skeleton-card"></div>
+      </div>
+
+      <!-- Actual Movies Grid -->
+      <div class="movies-grid" id="movies-grid"></div>
+
+      <!-- Pagination -->
+      <div class="pagination-container" id="pagination">
+        <button class="btn btn-secondary pagination-btn" id="prev-btn" disabled><i class="fa-solid fa-arrow-left"></i> Previous</button>
+        <span class="page-num" id="page-num-display">Page 1</span>
+        <button class="btn btn-secondary pagination-btn" id="next-btn">Next <i class="fa-solid fa-arrow-right"></i></button>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- Details Popup Modal -->
+  <div class="modal-overlay" id="detail-modal">
+    <div class="modal-container">
+      <button class="modal-close-btn" id="close-modal-btn" aria-label="Close details"><i class="fa-solid fa-xmark"></i></button>
+      
+      <div class="modal-body">
+        <!-- Skeleton inside Modal -->
+        <div class="modal-skeleton" id="modal-skeleton">
+          <div class="skeleton-modal-left"></div>
+          <div class="skeleton-modal-right">
+            <div class="skeleton-line" style="width: 70%; height: 32px;"></div>
+            <div class="skeleton-line" style="width: 40%;"></div>
+            <div class="skeleton-line" style="width: 90%; height: 80px;"></div>
+            <div class="skeleton-line" style="width: 100%; height: 120px;"></div>
+          </div>
+        </div>
+
+        <!-- Actual Modal Content -->
+        <div class="modal-content-inner" id="modal-real-content" style="display: none;">
+          <div class="movie-meta-layout">
+            
+            <!-- Left Side: Poster & Info Table -->
+            <div class="movie-meta-left">
+              <div class="movie-detail-poster-wrapper">
+                <img src="" alt="" id="movie-detail-poster" class="movie-detail-poster">
+              </div>
+              
+              <!-- Info Box (IMDb, Language, Size etc.) -->
+              <div class="movie-info-specs" id="movie-specs-box">
+                <!-- Will be populated dynamically -->
+              </div>
+            </div>
+
+            <!-- Right Side: Title, Synopsis, Screens, Downloads -->
+            <div class="movie-meta-right">
+              <h2 id="movie-detail-title">Movie Title</h2>
+              
+              <div class="synopsis-box">
+                <h3><i class="fa-solid fa-align-left"></i> Synopsis / Plot</h3>
+                <p id="movie-detail-plot">Plot is loading...</p>
+              </div>
+
+              <!-- Watch Online Video Player -->
+              <div class="player-box" id="player-box-container" style="display: none;">
+                <h3><i class="fa-solid fa-circle-play"></i> Watch Online / Video Player</h3>
+                
+                <!-- Native Video Player (For direct streaming) -->
+                <div class="player-wrapper-native" id="native-player-wrapper" style="display: none;">
+                  <video id="native-video-player" controls playsinline webkit-playsinline preload="metadata">
+                    <source src="" type="video/mp4">
+                    Your browser does not support the video tag.
+                  </video>
+                </div>
+
+                <!-- Iframe Player (For fallback servers) -->
+                <div class="player-wrapper-iframe" id="iframe-player-wrapper" style="display: none;">
+                  <iframe id="video-player-iframe" src="" frameborder="0" referrerpolicy="origin" allow="autoplay; encrypted-media" allowfullscreen></iframe>
+                </div>
+
+                <!-- Server Selector -->
+                 <div class="server-selector" id="player-servers">
+                   <span class="server-selector-label"><i class="fa-solid fa-server"></i> Choose Server:</span>
+                   <button class="server-btn" id="server-btn-direct" style="display: none;">Direct Stream (Premium)</button>
+                   <button class="server-btn" data-src-prefix="https://vidsrc.to/embed/movie/">Server 1 (Vidsrc.to)</button>
+                   <button class="server-btn" data-src-prefix="https://vidsrc.cc/v2/embed/movie/">Server 2 (Vidsrc.cc)</button>
+                   <button class="server-btn" data-src-prefix="https://player.autoembed.cc/embed/movie/">Server 3 (Autoembed)</button>
+                   <button class="server-btn" data-src-prefix="https://multiembed.mov/?video_id=">Server 4 (Multiembed)</button>
+                 </div>
+
+                 <!-- Aspect Ratio Selector -->
+                 <div class="aspect-selector" id="player-aspects">
+                   <span class="aspect-selector-label"><i class="fa-solid fa-expand"></i> Aspect Ratio:</span>
+                   <button class="aspect-btn active" data-aspect="fit">Auto (Fit)</button>
+                   <button class="aspect-btn" data-aspect="16-9">16:9</button>
+                   <button class="aspect-btn" data-aspect="21-9">21:9</button>
+                   <button class="aspect-btn" data-aspect="4-3">4:3</button>
+                   <button class="aspect-btn" data-aspect="stretch">Stretch</button>
+                   <button class="aspect-btn" data-aspect="zoom">Zoom</button>
+                 </div>
+              </div>
+
+              <!-- Screenshots Gallery -->
+              <div class="screenshots-box" id="screenshots-box-container">
+                <h3><i class="fa-solid fa-images"></i> Screen Captures</h3>
+                <div class="screenshots-grid" id="movie-screenshots">
+                  <!-- Will be populated dynamically -->
+                </div>
+              </div>
+
+              <!-- Download Links/Servers -->
+              <div class="downloads-box">
+                <h3><i class="fa-solid fa-circle-down"></i> High Speed Download Links</h3>
+                <p class="download-tip"><i class="fa-solid fa-shield-halved"></i> Masked secure links - Server-side proxy routing</p>
+                <div class="download-buttons-grid" id="movie-downloads">
+                  <!-- Will be populated dynamically -->
+                </div>
+              </div>
+            </div>
+
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <!-- Footer -->
+  <footer>
+    <div class="footer-container">
+      <p>© 2026 nikkXmovie Stream Portal. Powered by Secure Link Redirection. All Rights Reserved.</p>
+      <p class="footer-note">Join us on Telegram: <a href="https://t.me/nikkgill" target="_blank" style="color: #00f2fe; text-decoration: none; font-weight: 600; margin-left: 5px;"><i class="fa-brands fa-telegram"></i> @nikkgill</a></p>
+      <p class="footer-note">nikkXmovie does not host any file on its database. All contents are parsed via public sources.</p>
+    </div>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>
