@@ -38,7 +38,7 @@ async function fetchHtml(url) {
         'Accept-Language': 'en-US,en;q=0.5',
         'Referer': TARGET_BASE_URL + '/'
       },
-      timeout: 15000,
+      timeout: 25000,
       httpsAgent: httpsAgent
     });
     return response.data;
@@ -136,6 +136,52 @@ async function getImdbIdByTitle(title) {
   return null;
 }
 
+// Helper to scrape specific category listings from Vegamovies with pagination support
+async function scrapeVegaCategory(category, page) {
+  let url = 'https://vegamovie.ss/';
+  if (category === 'anime') {
+    url = page > 1 ? `https://vegamovie.ss/category/animation/page/${page}/` : `https://vegamovie.ss/category/animation/`;
+  } else if (category === 'bollywood') {
+    url = page > 1 ? `https://vegamovie.ss/bollywood-movies/page/${page}/` : `https://vegamovie.ss/bollywood-movies/`;
+  } else if (category === 'hollywood') {
+    url = page > 1 ? `https://vegamovie.ss/hollywood-movies/page/${page}/` : `https://vegamovie.ss/hollywood-movies/`;
+  } else if (category === 'dual-audio') {
+    url = page > 1 ? `https://vegamovie.ss/dual-audio-hindi-english-movies/page/${page}/` : `https://vegamovie.ss/dual-audio-hindi-english-movies/`;
+  } else if (category === 'web-series' || category === 'tv-show') {
+    url = page > 1 ? `https://vegamovie.ss/tv-shows/page/${page}/` : `https://vegamovie.ss/tv-shows/`;
+  } else if (category === 'south-indian') {
+    url = page > 1 ? `https://vegamovie.ss/category/south-indian-dubbed-movies-download/page/${page}/` : `https://vegamovie.ss/category/south-indian-dubbed-movies-download/`;
+  } else {
+    url = page > 1 ? `https://vegamovie.ss/page/${page}/` : `https://vegamovie.ss/`;
+  }
+
+  const items = [];
+  try {
+    const html = await fetchHtml(url);
+    const $ = cheerio.load(html);
+    $('article, .post-item, .blog-post, .post').each((i, el) => {
+      const titleEl = $(el).find('h2 a, h3 a, a').first();
+      const href = titleEl.attr('href');
+      const title = titleEl.text().trim() || $(el).find('img').attr('alt') || '';
+      const imgEl = $(el).find('img').first();
+      let poster = imgEl.attr('src') || imgEl.attr('data-src') || imgEl.attr('data-lazy-src') || '';
+
+      if (href && title) {
+        const absoluteDetailUrl = href.startsWith('http') ? href : new URL(href, 'https://vegamovie.ss').href;
+        const absolutePoster = poster ? (poster.startsWith('http') ? poster : new URL(poster, 'https://vegamovie.ss').href) : '';
+        items.push({
+          title: cleanTitleBranding(title),
+          detailId: Buffer.from(absoluteDetailUrl).toString('base64'),
+          poster: absolutePoster
+        });
+      }
+    });
+  } catch (err) {
+    console.error(`Failed to scrape Vegamovies category ${category} page ${page}:`, err.message);
+  }
+  return items;
+}
+
 // 1. API: List movies (Home, Categories, Search)
 app.get('/api/movies', async (req, res) => {
   const page = parseInt(req.query.page) || 1;
@@ -183,10 +229,12 @@ app.get('/api/movies', async (req, res) => {
     }
 
     let html = '';
-    try {
-      html = await fetchHtml(url);
-    } catch(e) {
-      console.error(`Failed to fetch main category URL: ${url}`, e.message);
+    if (category !== 'anime') {
+      try {
+        html = await fetchHtml(url);
+      } catch(e) {
+        console.error(`Failed to fetch main category URL: ${url}`, e.message);
+      }
     }
     
     const $ = cheerio.load(html || '');
@@ -295,31 +343,14 @@ app.get('/api/movies', async (req, res) => {
       } catch (e) {
         console.error("Failed to query Vegamovies in background:", e.message);
       }
-    } else if (!category && page === 1) {
-      // Merging Vegamovies homepage items into main list
+    } else {
+      // Scrape Vegamovies category or home page matching the requested page index
       try {
-        console.log(`[Vega Scraper] Background loading homepage items`);
-        const vegaHtml = await fetchHtml('https://vegamovie.ss/');
-        const $vega = cheerio.load(vegaHtml);
-        $vega('article, .post-item, .blog-post, .post').each((i, el) => {
-          const titleEl = $vega(el).find('h2 a, h3 a, a').first();
-          const href = titleEl.attr('href');
-          const title = titleEl.text().trim() || $vega(el).find('img').attr('alt') || '';
-          const imgEl = $vega(el).find('img').first();
-          let poster = imgEl.attr('src') || imgEl.attr('data-src') || imgEl.attr('data-lazy-src') || '';
-
-          if (href && title) {
-            const absoluteDetailUrl = href.startsWith('http') ? href : new URL(href, 'https://vegamovie.ss').href;
-            const absolutePoster = poster ? (poster.startsWith('http') ? poster : new URL(poster, 'https://vegamovie.ss').href) : '';
-            vegaMovies.push({
-              title: cleanTitleBranding(title),
-              detailId: Buffer.from(absoluteDetailUrl).toString('base64'),
-              poster: absolutePoster
-            });
-          }
-        });
+        console.log(`[Vega Scraper] Fetching category "${category || 'home'}" page ${page}`);
+        const vegaItems = await scrapeVegaCategory(category, page);
+        vegaMovies = vegaItems;
       } catch (e) {
-        console.error("Failed to query Vegamovies homepage:", e.message);
+        console.error("Failed to query Vegamovies category:", e.message);
       }
     }
 
@@ -438,12 +469,17 @@ app.get('/api/movie-details', async (req, res) => {
             label = $(div).find('h3').first().text().trim() || 'Download Link';
           }
           
-          const title = `Download ${label}`;
+          const linkText = $(el).text().trim() || 'Download';
+          const title = `${linkText} (${label})`;
+          
+          const titleLower = title.toLowerCase();
+          const isEp = titleLower.includes('episode') || titleLower.includes('ep-') || /\bep\b/i.test(titleLower) || titleLower.includes('ep ') || titleLower.includes('pack') || titleLower.includes('complete') || titleLower.includes('season') || titleLower.includes('s0') || titleLower.includes('s1') || titleLower.includes('s2') || titleLower.includes('s3') || titleLower.includes('s4') || titleLower.includes('s5');
+          
           const maskedUrl = `/api/download?id=${Buffer.from(href).toString('base64')}`;
           downloads.push({
             title: title,
             url: maskedUrl,
-            isEpisode: false
+            isEpisode: isEp
           });
         });
       });
@@ -457,11 +493,13 @@ app.get('/api/movie-details', async (req, res) => {
             if (!text || text.length < 5 || text.includes('[]')) {
               text = $(el).attr('title') || 'Download Link';
             }
+            const titleLower = text.toLowerCase();
+            const isEp = titleLower.includes('episode') || titleLower.includes('ep-') || /\bep\b/i.test(titleLower) || titleLower.includes('ep ') || titleLower.includes('pack') || titleLower.includes('complete') || titleLower.includes('season') || titleLower.includes('s0') || titleLower.includes('s1') || titleLower.includes('s2') || titleLower.includes('s3') || titleLower.includes('s4') || titleLower.includes('s5');
             const maskedUrl = `/api/download?id=${Buffer.from(href).toString('base64')}`;
             downloads.push({
               title: text,
               url: maskedUrl,
-              isEpisode: false
+              isEpisode: isEp
             });
           }
         });

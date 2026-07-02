@@ -11,7 +11,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
   <!-- FontAwesome Icons -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-  <link rel="stylesheet" href="style.css?v=2.2">
+  <link rel="stylesheet" href="style.css?v=3.3">
   <!-- NXM Favicon Logo -->
   <link rel="icon" type="image/png" href="/nxm_logo.png">
 </head>
@@ -53,6 +53,7 @@
       <button class="cat-btn" data-category="web-series">Web Series</button>
       <button class="cat-btn" data-category="tv-show">TV Show</button>
       <button class="cat-btn" data-category="south-indian">South Indian</button>
+      <button class="cat-btn" data-category="anime">Anime</button>
       <button class="cat-btn" data-category="18">18+</button>
     </div>
   </nav>
@@ -163,14 +164,42 @@
                   <iframe id="video-player-iframe" src="" frameborder="0" referrerpolicy="origin" allow="autoplay; encrypted-media" allowfullscreen></iframe>
                 </div>
 
+                <!-- Episode Navigation (Only for web series / shows with episodes) -->
+                <div class="episode-navigation-bar" id="episode-nav-bar" style="display: none;">
+                  <button class="ep-nav-btn" id="ep-prev-btn" disabled><i class="fa-solid fa-backward-step"></i> Prev Episode</button>
+                  <span class="ep-nav-label" id="ep-current-label">Playing: Episode 1</span>
+                  <button class="ep-nav-btn" id="ep-next-btn" disabled>Next Episode <i class="fa-solid fa-forward-step"></i></button>
+                </div>
+
                 <!-- Server Selector -->
                  <div class="server-selector" id="player-servers">
                    <span class="server-selector-label"><i class="fa-solid fa-server"></i> Choose Server:</span>
                    <button class="server-btn" id="server-btn-direct" style="display: none;">Direct Stream (Premium)</button>
-                   <button class="server-btn" data-src-prefix="https://vidsrc.net/embed/movie/">Server 1 (Vidsrc.net)</button>
+                   <button class="server-btn" data-src-prefix="https://vidsrc.to/embed/movie/">Server 1 (Vidsrc.to)</button>
                    <button class="server-btn" data-src-prefix="https://vidsrc.cc/v2/embed/movie/">Server 2 (Vidsrc.cc)</button>
                    <button class="server-btn" data-src-prefix="https://player.autoembed.cc/embed/movie/">Server 3 (Autoembed)</button>
                    <button class="server-btn" data-src-prefix="https://embed.su/embed/movie/">Server 4 (Embed.su)</button>
+                 </div>
+
+                 <!-- Stream Quality Selector -->
+                 <div class="quality-selector" id="player-quality-container" style="display: none;">
+                   <span class="quality-selector-label"><i class="fa-solid fa-sliders"></i> Quality:</span>
+                   <div class="quality-options" id="player-quality-options"></div>
+                 </div>
+
+                 <!-- Audio Language Selector -->
+                 <div class="audio-selector" id="player-audio-container" style="display: none;">
+                   <span class="audio-selector-label"><i class="fa-solid fa-language"></i> Audio Language:</span>
+                   <div class="audio-options" id="player-audio-options"></div>
+                 </div>
+
+                 <!-- Brightness Controller -->
+                 <div class="brightness-selector" id="player-brightness-container">
+                   <span class="brightness-selector-label"><i class="fa-solid fa-sun"></i> Brightness:</span>
+                   <div class="brightness-control-wrapper">
+                     <input type="range" id="player-brightness-slider" min="50" max="150" value="100" class="brightness-slider">
+                     <span id="brightness-value-label">100%</span>
+                   </div>
                  </div>
 
                  <!-- Aspect Ratio Selector -->
@@ -219,6 +248,6 @@
     </div>
   </footer>
 
-  <script src="app.js?v=2.2"></script>
+  <script src="app.js?v=3.2"></script>
 </body>
 </html>

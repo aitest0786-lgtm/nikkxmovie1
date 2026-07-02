@@ -10,6 +10,8 @@ let currentMediaType = 'movie';
 let currentSeason = 1;
 let currentEpisode = 1;
 let currentDirectStreamUrl = null;
+let currentEpisodesList = [];
+let currentPlayingEpisodeIndex = -1;
 
 // DOM Elements
 const moviesGrid = document.getElementById('movies-grid');
@@ -194,6 +196,58 @@ function setupEventListeners() {
     });
   });
 
+  // Episode Navigation Event Listeners
+  document.getElementById('ep-prev-btn').addEventListener('click', () => {
+    if (currentPlayingEpisodeIndex > 0) {
+      const prevIndex = currentPlayingEpisodeIndex - 1;
+      const ep = currentEpisodesList[prevIndex];
+      playEpisode(ep.url, ep.title);
+    }
+  });
+
+  document.getElementById('ep-next-btn').addEventListener('click', () => {
+    if (currentPlayingEpisodeIndex !== -1 && currentPlayingEpisodeIndex < currentEpisodesList.length - 1) {
+      const nextIndex = currentPlayingEpisodeIndex + 1;
+      const ep = currentEpisodesList[nextIndex];
+      playEpisode(ep.url, ep.title);
+    } else if (currentPlayingEpisodeIndex === -1 && currentEpisodesList.length > 0) {
+      const ep = currentEpisodesList[0];
+      playEpisode(ep.url, ep.title);
+    }
+  });
+
+  // Brightness Slider Control Listener
+  const brightnessSlider = document.getElementById('player-brightness-slider');
+  const brightnessLabel = document.getElementById('brightness-value-label');
+  if (brightnessSlider && brightnessLabel) {
+    brightnessSlider.addEventListener('input', (e) => {
+      const value = e.target.value;
+      brightnessLabel.textContent = `${value}%`;
+      const valDecimal = value / 100;
+      nativePlayerWrapper.style.filter = `brightness(${valDecimal})`;
+      iframePlayerWrapper.style.filter = `brightness(${valDecimal})`;
+    });
+  }
+
+  // Auto-play next episode when current episode ends
+  nativeVideoPlayer.addEventListener('ended', () => {
+    if (currentEpisodesList.length > 0 && currentPlayingEpisodeIndex !== -1 && currentPlayingEpisodeIndex < currentEpisodesList.length - 1) {
+      showPlayerToast('Episode finished. Autoplay next episode in 3 seconds...');
+      setTimeout(() => {
+        const nextIndex = currentPlayingEpisodeIndex + 1;
+        const nextEp = currentEpisodesList[nextIndex];
+        
+        const epBtns = document.querySelectorAll('.episode-item-btn');
+        if (epBtns.length > nextIndex) {
+          epBtns.forEach(b => b.classList.remove('active'));
+          epBtns[nextIndex].classList.add('active');
+        }
+        
+        playEpisode(nextEp.url, nextEp.title);
+      }, 3000);
+    }
+  });
+
   // Native Video Player error handler to assist debugging
   nativeVideoPlayer.addEventListener('error', () => {
     // Only handle error if the modal is actually open and video has a source
@@ -212,9 +266,9 @@ function setupEventListeners() {
       }
       console.error(`Native video error [Code ${err.code}]: ${message}`, err);
 
-      // Automatic fallback to Server 1 (vidsrc.net) if IMDb ID is available
+      // Automatic fallback to Server 1 (vidsrc.to) if IMDb ID is available
       if (currentImdbId) {
-        console.log('Direct stream failed. Switching to Server 1 (vidsrc.net) fallback...');
+        console.log('Direct stream failed. Switching to Server 1 (vidsrc.to) fallback...');
         const serverBtn = document.querySelector('#player-servers .server-btn[data-src-prefix]');
         if (serverBtn) {
           // Switch to Server 1
@@ -492,7 +546,67 @@ async function openDetailsModal(detailId, posterUrl) {
       }
     });
 
-    const hasEpisodes = movie.downloads && movie.downloads.some(d => d.isEpisode);
+    // Determine if it is a TV show/Anime series
+    const lowerTitle = movie.title.toLowerCase();
+    const isShow = currentCategory === 'tv-show' || 
+                   currentCategory === 'web-series' || 
+                   currentCategory === 'anime' ||
+                   lowerTitle.includes('season') || 
+                   /\bs\d+/i.test(lowerTitle) ||
+                   /\bep\d+/i.test(lowerTitle) ||
+                   lowerTitle.includes('complete') ||
+                   lowerTitle.includes('added');
+
+    let hasEpisodes = movie.downloads && movie.downloads.some(d => d.isEpisode);
+    
+    if (!hasEpisodes && isShow && movie.downloads && movie.downloads.length > 0) {
+      let numEpisodes = 12; // default fallback
+      const allEpMatch = movie.title.match(/all episodes/i);
+      if (allEpMatch) {
+        numEpisodes = 24;
+      } else {
+        const epAddedMatch = movie.title.match(/(?:ep|episode)\s*[-–]?\s*(\d+)\s+added/i);
+        const epRangeMatch = movie.title.match(/(?:ep|episode)\s*[-–]?\s*(\d+)\s*to\s*(\d+)\s+added/i);
+        if (epRangeMatch) {
+          numEpisodes = parseInt(epRangeMatch[2]);
+        } else if (epAddedMatch) {
+          numEpisodes = parseInt(epAddedMatch[1]);
+        }
+      }
+      
+      let season = 1;
+      const sMatch = movie.title.match(/season\s*(\d+)/i);
+      if (sMatch) {
+        season = parseInt(sMatch[1]);
+      }
+      
+      const virtualDownloads = [];
+      for (let i = 1; i <= numEpisodes; i++) {
+        virtualDownloads.push({
+          title: `Episode ${i} [Season ${season}]`,
+          url: `virtual-ep-s${season}-e${i}`,
+          isEpisode: true
+        });
+      }
+      movie.downloads = [...virtualDownloads, ...movie.downloads];
+      hasEpisodes = true;
+    }
+
+    // Save current episodes list
+    currentEpisodesList = [];
+    if (movie.downloads) {
+      currentEpisodesList = movie.downloads.filter(d => d.isEpisode);
+    }
+
+    // Toggle Episode Navigation Bar
+    const epNavBar = document.getElementById('episode-nav-bar');
+    if (currentEpisodesList.length > 1) {
+      epNavBar.style.display = 'flex';
+      currentPlayingEpisodeIndex = -1;
+      updateEpisodeNavButtons();
+    } else {
+      epNavBar.style.display = 'none';
+    }
 
     if (movie.imdbId || hasEpisodes) {
       if (movie.imdbId) {
@@ -563,6 +677,15 @@ async function openDetailsModal(detailId, posterUrl) {
       iframePlayerWrapper.style.display = 'none';
     }
 
+    // Populate Quality & Audio options for movies
+    if (currentEpisodesList.length === 0) {
+      populateQualityOptions(movie.downloads, false);
+      populateAudioOptions(movie.downloads);
+    } else {
+      document.getElementById('player-quality-container').style.display = 'none';
+      document.getElementById('player-audio-container').style.display = 'none';
+    }
+
     // Switch display from skeleton to real content
     modalSkeleton.style.display = 'none';
     modalRealContent.style.display = 'block';
@@ -577,6 +700,28 @@ function closeModal() {
   detailModal.classList.remove('open');
   document.body.style.overflow = 'auto'; // Restore background scroll
   
+  // Reset quality selector
+  const qContainer = document.getElementById('player-quality-container');
+  if (qContainer) qContainer.style.display = 'none';
+  const qOptions = document.getElementById('player-quality-options');
+  if (qOptions) qOptions.innerHTML = '';
+
+  // Reset audio selector
+  const aContainer = document.getElementById('player-audio-container');
+  if (aContainer) aContainer.style.display = 'none';
+  const aOptions = document.getElementById('player-audio-options');
+  if (aOptions) aOptions.innerHTML = '';
+
+  // Reset brightness UI
+  const brightnessSlider = document.getElementById('player-brightness-slider');
+  const brightnessLabel = document.getElementById('brightness-value-label');
+  if (brightnessSlider && brightnessLabel) {
+    brightnessSlider.value = 100;
+    brightnessLabel.textContent = '100%';
+    nativePlayerWrapper.style.filter = 'none';
+    iframePlayerWrapper.style.filter = 'none';
+  }
+
   // Reset video player state to stop background audio playback
   videoPlayerIframe.src = '';
   nativeVideoPlayer.pause();
@@ -707,18 +852,46 @@ function showPlayerToast(message) {
 
 // Play Episode on-demand handler
 async function playEpisode(epUrl, epTitle) {
+  // Update currently playing index
+  const idx = currentEpisodesList.findIndex(d => d.url === epUrl);
+  if (idx !== -1) {
+    currentPlayingEpisodeIndex = idx;
+  } else {
+    currentPlayingEpisodeIndex = currentEpisodesList.findIndex(d => d.title === epTitle);
+  }
+  updateEpisodeNavButtons();
+
   showPlayerToast(`Loading Episode: ${epTitle}...`);
   
   // Parse Season and Episode
   let season = 1;
   let episode = 1;
-  const sMatch = epTitle.match(/s(\d+)|season\s*(\d+)/i);
-  if (sMatch) {
-    season = parseInt(sMatch[1] || sMatch[2]);
-  }
-  const eMatch = epTitle.match(/ep(\d+)|episode\s*(\d+)/i);
-  if (eMatch) {
-    episode = parseInt(eMatch[1] || eMatch[2]);
+  
+  if (epUrl.startsWith('virtual-ep-')) {
+    const parts = epUrl.split('-');
+    season = parseInt(parts[2].replace('s', ''));
+    episode = parseInt(parts[3].replace('e', ''));
+    
+    const activeServerBtn = document.querySelector('#player-servers .server-btn.active');
+    const serverId = activeServerBtn ? activeServerBtn.id : '';
+    if (serverId === 'server-btn-direct') {
+      showPlayerToast('Direct stream unavailable for virtual links. Switching to Server 1...');
+      const server1Btn = document.querySelector('#player-servers .server-btn[data-src-prefix]');
+      if (server1Btn) {
+        server1Btn.click();
+        setTimeout(() => playEpisode(epUrl, epTitle), 100);
+        return;
+      }
+    }
+  } else {
+    const sMatch = epTitle.match(/s(\d+)|season\s*(\d+)/i);
+    if (sMatch) {
+      season = parseInt(sMatch[1] || sMatch[2]);
+    }
+    const eMatch = epTitle.match(/ep(\d+)|episode\s*(\d+)/i);
+    if (eMatch) {
+      episode = parseInt(eMatch[1] || eMatch[2]);
+    }
   }
   
   currentSeason = season;
@@ -784,4 +957,204 @@ async function playEpisode(epUrl, epTitle) {
       setTimeout(() => playEpisode(epUrl, epTitle), 100);
     }
   }
+}
+
+// Update Episode Navigation Buttons disabled/enabled states and playing label
+function updateEpisodeNavButtons() {
+  const prevBtn = document.getElementById('ep-prev-btn');
+  const nextBtn = document.getElementById('ep-next-btn');
+  const currentLabel = document.getElementById('ep-current-label');
+  
+  if (!prevBtn || !nextBtn || !currentLabel) return;
+  
+  if (currentPlayingEpisodeIndex === -1) {
+    prevBtn.disabled = true;
+    nextBtn.disabled = currentEpisodesList.length === 0;
+    currentLabel.textContent = `Select an episode to play`;
+  } else {
+    prevBtn.disabled = currentPlayingEpisodeIndex === 0;
+    nextBtn.disabled = currentPlayingEpisodeIndex === currentEpisodesList.length - 1;
+    const currentEp = currentEpisodesList[currentPlayingEpisodeIndex];
+    currentLabel.textContent = `Playing: ${currentEp.title.replace(/\[.*?\]|\(.*?\)/g, '').trim()}`;
+  }
+}
+
+// Populate Stream Quality Options dynamically from parsed download links
+function populateQualityOptions(downloads, isEpisode = false) {
+  const container = document.getElementById('player-quality-container');
+  const optionsDiv = document.getElementById('player-quality-options');
+  if (!container || !optionsDiv) return;
+  
+  optionsDiv.innerHTML = '';
+  
+  if (!downloads || downloads.length === 0) {
+    container.style.display = 'none';
+    return;
+  }
+  
+  let qualityLinks = [];
+  if (isEpisode) {
+    qualityLinks = downloads.filter(d => d.title.toLowerCase().includes('play') || d.title.toLowerCase().includes('episode') || d.isEpisode);
+  } else {
+    qualityLinks = downloads.filter(d => {
+      const title = d.title.toLowerCase();
+      return !title.includes('sample') && !title.includes('zip') && (
+        title.includes('480p') || title.includes('720p') || title.includes('1080p') || title.includes('2160p') || 
+        title.includes('4k') || title.includes('hdr') || title.includes('webrip') || title.includes('hd') || 
+        title.includes('mkv') || title.includes('mp4')
+      );
+    });
+  }
+  
+  if (qualityLinks.length <= 1) {
+    container.style.display = 'none';
+    return;
+  }
+  
+  container.style.display = 'flex';
+  
+  qualityLinks.forEach((link, idx) => {
+    let label = 'HD';
+    const match = link.title.match(/\b(480p|720p|1080p|2160p|4k)\b/i);
+    if (match) {
+      label = match[0].toUpperCase();
+    } else if (link.title.toLowerCase().includes('hd')) {
+      label = 'HD';
+    } else {
+      label = `Link ${idx + 1}`;
+    }
+    
+    const btn = document.createElement('button');
+    btn.className = 'quality-btn';
+    btn.textContent = label;
+    if (idx === 0) btn.classList.add('active');
+    
+    btn.addEventListener('click', async () => {
+      const qBtns = optionsDiv.querySelectorAll('.quality-btn');
+      qBtns.forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      
+      showPlayerToast(`Switching quality to ${label}...`);
+      
+      try {
+        let streamApiUrl = '';
+        if (link.url.startsWith('/api/stream-play') || link.url.startsWith('/api/download')) {
+          const urlParams = new URLSearchParams(link.url.split('?')[1]);
+          const id = urlParams.get('id');
+          streamApiUrl = `/api/stream-play?id=${id}`;
+        } else {
+          const id = btoa(link.url);
+          const res = await fetch(`/api/episode-stream?id=${id}`);
+          if (!res.ok) throw new Error('Failed to resolve episode stream');
+          const data = await res.json();
+          streamApiUrl = data.streamUrl;
+        }
+        
+        if (streamApiUrl) {
+          currentDirectStreamUrl = streamApiUrl;
+          
+          const directBtn = document.getElementById('server-btn-direct');
+          if (directBtn) {
+            // Show Direct button in case it was hidden
+            directBtn.style.display = 'inline-block';
+            directBtn.click();
+          }
+        } else {
+          showPlayerToast('Failed to load this quality stream.');
+        }
+      } catch (err) {
+        console.error('Error switching quality:', err);
+        showPlayerToast('Quality stream offline or unavailable.');
+      }
+    });
+    
+    optionsDiv.appendChild(btn);
+  });
+}
+
+// Populate Audio Dub / Language selector dynamically from parsed download links
+function populateAudioOptions(downloads) {
+  const container = document.getElementById('player-audio-container');
+  const optionsDiv = document.getElementById('player-audio-options');
+  if (!container || !optionsDiv) return;
+  
+  optionsDiv.innerHTML = '';
+  
+  if (!downloads || downloads.length === 0) {
+    container.style.display = 'none';
+    return;
+  }
+  
+  const audioMap = new Map();
+  downloads.forEach(d => {
+    const titleLower = d.title.toLowerCase();
+    let lang = 'Hindi';
+    if (titleLower.includes('punjabi')) lang = 'Punjabi';
+    else if (titleLower.includes('english')) lang = 'English';
+    else if (titleLower.includes('tamil')) lang = 'Tamil';
+    else if (titleLower.includes('telugu')) lang = 'Telugu';
+    else if (titleLower.includes('dual')) lang = 'Dual Audio';
+    else if (titleLower.includes('multi')) lang = 'Multi Audio';
+    
+    if (!audioMap.has(lang)) {
+      audioMap.set(lang, d);
+    }
+  });
+  
+  if (audioMap.size <= 1) {
+    container.style.display = 'none';
+    return;
+  }
+  
+  container.style.display = 'flex';
+  
+  let isFirst = true;
+  audioMap.forEach((link, lang) => {
+    const btn = document.createElement('button');
+    btn.className = 'audio-btn';
+    btn.textContent = lang;
+    if (isFirst) {
+      btn.classList.add('active');
+      isFirst = false;
+    }
+    
+    btn.addEventListener('click', async () => {
+      const aBtns = optionsDiv.querySelectorAll('.audio-btn');
+      aBtns.forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      
+      showPlayerToast(`Switching audio language to ${lang}...`);
+      
+      try {
+        let streamApiUrl = '';
+        if (link.url.startsWith('/api/stream-play') || link.url.startsWith('/api/download')) {
+          const urlParams = new URLSearchParams(link.url.split('?')[1]);
+          const id = urlParams.get('id');
+          streamApiUrl = `/api/stream-play?id=${id}`;
+        } else {
+          const id = btoa(link.url);
+          const res = await fetch(`/api/episode-stream?id=${id}`);
+          if (!res.ok) throw new Error('Failed to resolve audio stream');
+          const data = await res.json();
+          streamApiUrl = data.streamUrl;
+        }
+        
+        if (streamApiUrl) {
+          currentDirectStreamUrl = streamApiUrl;
+          const directBtn = document.getElementById('server-btn-direct');
+          if (directBtn) {
+            directBtn.style.display = 'inline-block';
+            directBtn.click();
+          }
+        } else {
+          showPlayerToast('Failed to load this language stream.');
+        }
+      } catch (err) {
+        console.error('Error switching audio track:', err);
+        showPlayerToast('Language stream offline or unavailable.');
+      }
+    });
+    
+    optionsDiv.appendChild(btn);
+  });
 }
