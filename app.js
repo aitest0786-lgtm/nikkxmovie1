@@ -1,5 +1,12 @@
 // nikkXmovie Premium Client Script
 
+// Determine backend API URL dynamically based on where the app is being run from
+const API_BASE_URL = (
+  window.location.protocol === 'file:' || 
+  (window.location.hostname === 'localhost' && window.location.port !== '3000') ||
+  (window.location.hostname === '127.0.0.1' && window.location.port !== '3000')
+) ? 'http://localhost:3000' : '';
+
 let currentPage = 1;
 let currentCategory = '';
 let currentSearch = '';
@@ -12,6 +19,7 @@ let currentEpisode = 1;
 let currentDirectStreamUrl = null;
 let currentEpisodesList = [];
 let currentPlayingEpisodeIndex = -1;
+let directStreamWatchdog = null;
 
 // DOM Elements
 const moviesGrid = document.getElementById('movies-grid');
@@ -158,8 +166,10 @@ function setupEventListeners() {
           nativeVideoPlayer.src = currentDirectStreamUrl;
           nativeVideoPlayer.load();
           nativeVideoPlayer.play().catch(e => console.log('Autoplay blocked:', e));
+          startDirectStreamWatchdog();
         }
       } else {
+        clearDirectStreamWatchdog();
         nativePlayerWrapper.style.display = 'none';
         nativeVideoPlayer.pause();
         nativeVideoPlayer.removeAttribute('src');
@@ -317,8 +327,25 @@ function performSearch() {
 async function loadMovies() {
   showLoader();
   try {
-    const url = `/api/movies?page=${currentPage}&s=${encodeURIComponent(currentSearch)}&category=${currentCategory}`;
+    const url = `${API_BASE_URL}/api/movies?page=${currentPage}&s=${encodeURIComponent(currentSearch)}&category=${currentCategory}`;
     const response = await fetch(url);
+    
+    if (!response.ok) {
+      if (response.status === 503) {
+        // Render or backend spinning up
+        moviesGrid.innerHTML = `
+          <div class="no-results error-state">
+            <i class="fa-solid fa-spinner fa-spin"></i>
+            <h3>Server is Spinning Up</h3>
+            <p>The scraper backend is starting up. This can take up to 60 seconds on free hosting. Retrying in 5 seconds...</p>
+          </div>
+        `;
+        setTimeout(loadMovies, 5000);
+        return;
+      }
+      const errData = await response.json().catch(() => ({}));
+      throw new Error(errData.details || errData.error || `HTTP ${response.status}`);
+    }
     const data = await response.json();
 
     if (data.movies && data.movies.length > 0) {
@@ -421,7 +448,7 @@ async function openDetailsModal(detailId, posterUrl) {
   history.pushState({ modalOpen: true }, '', '#movie-details');
 
   try {
-    const response = await fetch(`/api/movie-details?id=${detailId}`);
+    const response = await fetch(`${API_BASE_URL}/api/movie-details?id=${detailId}`);
     if (!response.ok) {
       const errData = await response.json().catch(() => ({}));
       throw new Error(errData.details || errData.error || `HTTP ${response.status}`);
@@ -463,6 +490,25 @@ async function openDetailsModal(detailId, posterUrl) {
       screenshotsContainer.style.display = 'none';
     }
 
+    // Determine if it is a TV show/Anime series
+    const lowerTitle = movie.title.toLowerCase();
+    const isShow = currentCategory === 'tv-show' || 
+                   currentCategory === 'web-series' || 
+                   currentCategory === 'anime' ||
+                   lowerTitle.includes('season') || 
+                   /\bs\d+/i.test(lowerTitle) ||
+                   /\bep\d+/i.test(lowerTitle) ||
+                   lowerTitle.includes('complete') ||
+                   lowerTitle.includes('added');
+
+    // Reset iframe buttons display style back to visible
+    const allServerBtns = document.querySelectorAll('#player-servers .server-btn');
+    allServerBtns.forEach(btn => {
+      if (btn.id !== 'server-btn-direct') {
+        btn.style.display = 'inline-block';
+      }
+    });
+
     // Dynamic Download Links listing
     movieDownloads.innerHTML = '';
     if (movie.downloads && movie.downloads.length > 0) {
@@ -470,14 +516,18 @@ async function openDetailsModal(detailId, posterUrl) {
         const item = document.createElement('div');
         item.className = 'dwd-item';
         
-        if (dwd.isEpisode) {
+        const isSample = dwd.title.toLowerCase().includes('sample');
+        const isEpisodeOrShow = dwd.isEpisode || isShow;
+
+        if (isEpisodeOrShow && !isSample) {
+          const resolvedDwdUrl = dwd.url.startsWith('/api/') ? API_BASE_URL + dwd.url : dwd.url;
           item.innerHTML = `
             <div class="dwd-lbl" title="${dwd.title}">${dwd.title}</div>
             <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
               <button class="play-ep-btn" data-url="${dwd.url}" data-title="${dwd.title}">
                 <i class="fa-solid fa-circle-play"></i> Play Online
               </button>
-              <a href="${dwd.url}" class="dwd-btn-action" target="_blank" style="padding: 8px 14px;">
+              <a href="${resolvedDwdUrl}" class="dwd-btn-action" target="_blank" style="padding: 8px 14px;">
                 <i class="fa-solid fa-circle-down"></i> Download
               </a>
             </div>
@@ -491,9 +541,10 @@ async function openDetailsModal(detailId, posterUrl) {
             playEpisode(epUrl, epTitle);
           });
         } else {
+          const resolvedDwdUrl = dwd.url.startsWith('/api/') ? API_BASE_URL + dwd.url : dwd.url;
           item.innerHTML = `
             <div class="dwd-lbl" title="${dwd.title}">${dwd.title}</div>
-            <a href="${dwd.url}" class="dwd-btn-action" target="_blank">
+            <a href="${resolvedDwdUrl}" class="dwd-btn-action" target="_blank">
               <i class="fa-solid fa-circle-down"></i> Download Now
             </a>
           `;
@@ -519,7 +570,8 @@ async function openDetailsModal(detailId, posterUrl) {
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), 2000); // 2 second timeout limit
         
-        const check = await fetch(movie.streamUrl, {
+        const resolvedStreamUrl = movie.streamUrl.startsWith('/api/') ? API_BASE_URL + movie.streamUrl : movie.streamUrl;
+        const check = await fetch(resolvedStreamUrl, {
           method: 'GET',
           headers: { 'Range': 'bytes=0-0' }, // request first byte only
           signal: controller.signal
@@ -536,8 +588,9 @@ async function openDetailsModal(detailId, posterUrl) {
 
     // Configure Native Player (Direct Stream)
     if (movie.streamUrl && streamOnline) {
-      currentDirectStreamUrl = movie.streamUrl;
-      nativeVideoPlayer.src = movie.streamUrl;
+      const resolvedStreamUrl = movie.streamUrl.startsWith('/api/') ? API_BASE_URL + movie.streamUrl : movie.streamUrl;
+      currentDirectStreamUrl = resolvedStreamUrl;
+      nativeVideoPlayer.src = resolvedStreamUrl;
       nativeVideoPlayer.load();
       directServerBtn.style.display = 'inline-block';
       hasPlayer = true;
@@ -547,25 +600,6 @@ async function openDetailsModal(detailId, posterUrl) {
       nativeVideoPlayer.load();
       directServerBtn.style.display = 'none';
     }
-
-    // Reset iframe buttons display style back to visible
-    const allServerBtns = document.querySelectorAll('#player-servers .server-btn');
-    allServerBtns.forEach(btn => {
-      if (btn.id !== 'server-btn-direct') {
-        btn.style.display = 'inline-block';
-      }
-    });
-
-    // Determine if it is a TV show/Anime series
-    const lowerTitle = movie.title.toLowerCase();
-    const isShow = currentCategory === 'tv-show' || 
-                   currentCategory === 'web-series' || 
-                   currentCategory === 'anime' ||
-                   lowerTitle.includes('season') || 
-                   /\bs\d+/i.test(lowerTitle) ||
-                   /\bep\d+/i.test(lowerTitle) ||
-                   lowerTitle.includes('complete') ||
-                   lowerTitle.includes('added');
 
     let hasEpisodes = movie.downloads && movie.downloads.some(d => d.isEpisode);
     
@@ -602,10 +636,10 @@ async function openDetailsModal(detailId, posterUrl) {
       hasEpisodes = true;
     }
 
-    // Save current episodes list
+    // Save current episodes list (include all actual episode links + all non-sample downloads if it is a show)
     currentEpisodesList = [];
     if (movie.downloads) {
-      currentEpisodesList = movie.downloads.filter(d => d.isEpisode);
+      currentEpisodesList = movie.downloads.filter(d => (d.isEpisode || isShow) && !d.title.toLowerCase().includes('sample'));
     }
 
     // Toggle Episode Navigation Bar
@@ -654,6 +688,7 @@ async function openDetailsModal(detailId, posterUrl) {
         iframePlayerWrapper.style.display = 'none';
         videoPlayerIframe.src = '';
         nativePlayerWrapper.style.display = 'block';
+        startDirectStreamWatchdog();
       } else if (currentImdbId) {
         // Fallback to first available iframe server
         const firstIframeBtn = document.querySelector('.server-btn[data-src-prefix]');
@@ -733,6 +768,7 @@ function closeModal() {
   }
 
   // Reset video player state to stop background audio playback
+  clearDirectStreamWatchdog();
   videoPlayerIframe.src = '';
   nativeVideoPlayer.pause();
   nativeVideoPlayer.src = '';
@@ -921,7 +957,7 @@ async function playEpisode(epUrl, epTitle) {
   if (serverId === 'server-btn-direct') {
     try {
       const epId = epUrl.split('?id=')[1];
-      const res = await fetch(`/api/episode-stream?id=${epId}`);
+      const res = await fetch(`${API_BASE_URL}/api/episode-stream?id=${epId}`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       
@@ -929,7 +965,8 @@ async function playEpisode(epUrl, epTitle) {
         iframePlayerWrapper.style.display = 'none';
         videoPlayerIframe.src = '';
         nativePlayerWrapper.style.display = 'block';
-        nativeVideoPlayer.src = data.streamUrl;
+        const resolvedStreamUrl = data.streamUrl.startsWith('/api/') ? API_BASE_URL + data.streamUrl : data.streamUrl;
+        nativeVideoPlayer.src = resolvedStreamUrl;
         nativeVideoPlayer.load();
         nativeVideoPlayer.play().catch(e => console.log('Autoplay blocked:', e));
       } else {
@@ -1023,20 +1060,41 @@ function populateQualityOptions(downloads, isEpisode = false) {
   
   container.style.display = 'flex';
   
+  const seenLabels = new Set();
   qualityLinks.forEach((link, idx) => {
-    let label = 'HD';
+    let label = '720p';
+    const titleLower = link.title.toLowerCase();
     const match = link.title.match(/\b(480p|720p|1080p|2160p|4k)\b/i);
+    
     if (match) {
-      label = match[0].toUpperCase();
-    } else if (link.title.toLowerCase().includes('hd')) {
-      label = 'HD';
+      label = match[0].toLowerCase();
+    } else if (titleLower.includes('fhd') || titleLower.includes('full hd') || titleLower.includes('1080')) {
+      label = '1080p';
+    } else if (titleLower.includes('sd') || titleLower.includes('normal') || titleLower.includes('low') || titleLower.includes('480')) {
+      label = '480p';
+    } else if (titleLower.includes('hd') || titleLower.includes('720')) {
+      label = '720p';
     } else {
-      label = `Link ${idx + 1}`;
+      label = '720p';
     }
+    
+    // Dynamic mapping for generic duplicate links (e.g. mapping first HD to 720p, second HD to 1080p, etc.)
+    if (seenLabels.has(label)) {
+      if (label === '720p') {
+        label = '1080p';
+      } else if (label === '1080p') {
+        label = '480p';
+      } else {
+        label = `${label} (Mirror)`;
+      }
+    }
+    
+    seenLabels.add(label);
+    const displayLabel = label.toUpperCase();
     
     const btn = document.createElement('button');
     btn.className = 'quality-btn';
-    btn.textContent = label;
+    btn.textContent = displayLabel;
     if (idx === 0) btn.classList.add('active');
     
     btn.addEventListener('click', async () => {
@@ -1044,24 +1102,24 @@ function populateQualityOptions(downloads, isEpisode = false) {
       qBtns.forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
       
-      showPlayerToast(`Switching quality to ${label}...`);
+      showPlayerToast(`Switching quality to ${displayLabel}...`);
       
       try {
         let streamApiUrl = '';
-        if (link.url.startsWith('/api/stream-play') || link.url.startsWith('/api/download')) {
+        if (link.url.includes('/api/stream-play') || link.url.includes('/api/download')) {
           const urlParams = new URLSearchParams(link.url.split('?')[1]);
           const id = urlParams.get('id');
-          streamApiUrl = `/api/stream-play?id=${id}`;
+          streamApiUrl = `${API_BASE_URL}/api/stream-play?id=${id}`;
         } else {
           const id = btoa(link.url);
-          const res = await fetch(`/api/episode-stream?id=${id}`);
+          const res = await fetch(`${API_BASE_URL}/api/episode-stream?id=${id}`);
           if (!res.ok) throw new Error('Failed to resolve episode stream');
           const data = await res.json();
           streamApiUrl = data.streamUrl;
         }
         
         if (streamApiUrl) {
-          currentDirectStreamUrl = streamApiUrl;
+          currentDirectStreamUrl = streamApiUrl.startsWith('/api/') ? API_BASE_URL + streamApiUrl : streamApiUrl;
           
           const directBtn = document.getElementById('server-btn-direct');
           if (directBtn) {
@@ -1137,20 +1195,20 @@ function populateAudioOptions(downloads) {
       
       try {
         let streamApiUrl = '';
-        if (link.url.startsWith('/api/stream-play') || link.url.startsWith('/api/download')) {
+        if (link.url.includes('/api/stream-play') || link.url.includes('/api/download')) {
           const urlParams = new URLSearchParams(link.url.split('?')[1]);
           const id = urlParams.get('id');
-          streamApiUrl = `/api/stream-play?id=${id}`;
+          streamApiUrl = `${API_BASE_URL}/api/stream-play?id=${id}`;
         } else {
           const id = btoa(link.url);
-          const res = await fetch(`/api/episode-stream?id=${id}`);
+          const res = await fetch(`${API_BASE_URL}/api/episode-stream?id=${id}`);
           if (!res.ok) throw new Error('Failed to resolve audio stream');
           const data = await res.json();
           streamApiUrl = data.streamUrl;
         }
         
         if (streamApiUrl) {
-          currentDirectStreamUrl = streamApiUrl;
+          currentDirectStreamUrl = streamApiUrl.startsWith('/api/') ? API_BASE_URL + streamApiUrl : streamApiUrl;
           const directBtn = document.getElementById('server-btn-direct');
           if (directBtn) {
             directBtn.style.display = 'inline-block';
@@ -1167,4 +1225,35 @@ function populateAudioOptions(downloads) {
     
     optionsDiv.appendChild(btn);
   });
+}
+
+function clearDirectStreamWatchdog() {
+  if (directStreamWatchdog) {
+    clearTimeout(directStreamWatchdog);
+    directStreamWatchdog = null;
+  }
+}
+
+function startDirectStreamWatchdog() {
+  clearDirectStreamWatchdog();
+  directStreamWatchdog = setTimeout(() => {
+    const activeBtn = document.querySelector('#player-servers .server-btn.active');
+    if (activeBtn && activeBtn.id === 'server-btn-direct' && nativeVideoPlayer.paused) {
+      console.log('[Watchdog] Direct stream loading timed out. Swapping to Server 1...');
+      const serverBtn = document.querySelector('#player-servers .server-btn[data-src-prefix]');
+      if (serverBtn) {
+        nativeVideoPlayer.pause();
+        nativeVideoPlayer.removeAttribute('src');
+        nativeVideoPlayer.load();
+        serverBtn.click();
+        showPlayerToast('Direct stream buffered slowly. Swapped to Server 1...');
+      }
+    }
+  }, 6000);
+}
+
+// Hook up native video playback watchdog clear states
+if (typeof nativeVideoPlayer !== 'undefined' && nativeVideoPlayer) {
+  nativeVideoPlayer.addEventListener('playing', clearDirectStreamWatchdog);
+  nativeVideoPlayer.addEventListener('pause', clearDirectStreamWatchdog);
 }
