@@ -48,6 +48,15 @@ async function fetchHtml(url) {
   }
 }
 
+// Helper to resolve working OkJatt domain variations
+function resolveOkJattUrl(url) {
+  if (!url) return '';
+  if (url.includes('okjatt') && !url.includes('okjatt.bond')) {
+    return url.replace(/okjatthd\.bond|okjatt\.bond\.com|okjatt\.in|okjatt\.org|okjatt\.com|okjatt\.vip/gi, 'okjatt.bond');
+  }
+  return url;
+}
+
 // Helper to clean movie titles before searching IMDb
 function cleanMovieTitle(title) {
   if (!title) return '';
@@ -399,6 +408,7 @@ app.get('/api/movie-details', async (req, res) => {
   let detailUrl;
   try {
     detailUrl = Buffer.from(detailId, 'base64').toString('utf8');
+    detailUrl = resolveOkJattUrl(detailUrl);
   } catch (e) {
     return res.status(400).json({ error: 'Invalid movie ID format' });
   }
@@ -836,6 +846,7 @@ app.get('/api/download', async (req, res) => {
 
   try {
     let originalUrl = Buffer.from(maskedId, 'base64').toString('utf8');
+    originalUrl = resolveOkJattUrl(originalUrl);
     
     // Resolve relative URLs if any
     if (originalUrl.startsWith('/')) {
@@ -958,6 +969,7 @@ app.get('/api/stream-play', async (req, res) => {
 
   try {
     let originalUrl = Buffer.from(maskedId, 'base64').toString('utf8');
+    originalUrl = resolveOkJattUrl(originalUrl);
     
     // Resolve relative URLs if any
     if (originalUrl.startsWith('/')) {

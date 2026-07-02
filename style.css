@@ -1,17 +1,17 @@
 /* CineVibe Premium Stylesheet */
 
 :root {
-  --bg-primary: #050409;
-  --bg-secondary: #0c0a15;
-  --bg-card: rgba(16, 14, 28, 0.55);
+  --bg-primary: #080507;
+  --bg-secondary: #130a0d;
+  --bg-card: rgba(26, 16, 20, 0.55);
   --border-color: rgba(255, 255, 255, 0.05);
-  --accent-purple: #966eff;
-  --accent-purple-glow: rgba(150, 110, 255, 0.3);
-  --accent-cyan: #00f2fe;
-  --accent-pink: #ff007f;
+  --accent-purple: #e50914;
+  --accent-purple-glow: rgba(229, 9, 20, 0.35);
+  --accent-cyan: #ffb703;
+  --accent-pink: #ff0055;
   --text-main: #f8f9fa;
-  --text-muted: #8b899b;
-  --glass-bg: rgba(12, 10, 21, 0.75);
+  --text-muted: #a39fa8;
+  --glass-bg: rgba(19, 10, 13, 0.75);
   --glass-blur: blur(20px);
   --transition-smooth: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
   --font-display: 'Outfit', sans-serif;

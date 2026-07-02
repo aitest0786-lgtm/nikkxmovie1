@@ -250,6 +250,12 @@ function setupEventListeners() {
 
   // Native Video Player error handler to assist debugging
   nativeVideoPlayer.addEventListener('error', () => {
+    // Only handle error if direct stream is currently selected/active
+    const activeBtn = document.querySelector('#player-servers .server-btn.active');
+    if (!activeBtn || activeBtn.id !== 'server-btn-direct') {
+      return;
+    }
+
     // Only handle error if the modal is actually open and video has a source
     if (!detailModal.classList.contains('open') || !nativeVideoPlayer.src) {
       return;
@@ -271,6 +277,10 @@ function setupEventListeners() {
         console.log('Direct stream failed. Switching to Server 1 (vidsrc.to) fallback...');
         const serverBtn = document.querySelector('#player-servers .server-btn[data-src-prefix]');
         if (serverBtn) {
+          // Pause and clear native player immediately to prevent duplicate events
+          nativeVideoPlayer.pause();
+          nativeVideoPlayer.removeAttribute('src');
+          nativeVideoPlayer.load();
           // Switch to Server 1
           serverBtn.click();
           showPlayerToast('Direct stream format not supported. Switching to Server 1...');
