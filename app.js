@@ -160,14 +160,30 @@ function setupEventListeners() {
       btn.classList.add('active');
 
       if (btn.id === 'server-btn-direct') {
-        iframePlayerWrapper.style.display = 'none';
-        videoPlayerIframe.src = '';
-        nativePlayerWrapper.style.display = 'block';
-        if (currentDirectStreamUrl) {
-          nativeVideoPlayer.src = currentDirectStreamUrl;
+        if (currentDirectStreamUrl && currentDirectStreamUrl.includes('/api/netmirror-stream')) {
+          nativePlayerWrapper.style.display = 'none';
+          nativeVideoPlayer.removeAttribute('src');
           nativeVideoPlayer.load();
-          nativeVideoPlayer.play().catch(e => console.log('Autoplay blocked:', e));
-          startDirectStreamWatchdog();
+          iframePlayerWrapper.style.display = 'block';
+          
+          fetch(currentDirectStreamUrl)
+            .then(res => res.json())
+            .then(data => {
+              if (data.iframeUrl) {
+                videoPlayerIframe.src = data.iframeUrl.startsWith('/api/') ? API_BASE_URL + data.iframeUrl : data.iframeUrl;
+              }
+            })
+            .catch(err => console.error('Failed to load NetMirror movie stream:', err));
+        } else {
+          iframePlayerWrapper.style.display = 'none';
+          videoPlayerIframe.src = '';
+          nativePlayerWrapper.style.display = 'block';
+          if (currentDirectStreamUrl) {
+            nativeVideoPlayer.src = currentDirectStreamUrl;
+            nativeVideoPlayer.load();
+            nativeVideoPlayer.play().catch(e => console.log('Autoplay blocked:', e));
+            startDirectStreamWatchdog();
+          }
         }
       } else {
         clearDirectStreamWatchdog();
@@ -267,8 +283,9 @@ function setupEventListeners() {
       return;
     }
 
-    // Only handle error if the modal is actually open and video has a source
-    if (!detailModal.classList.contains('open') || !nativeVideoPlayer.src) {
+    // Only handle error if the modal is actually open and video has a valid direct source attribute
+    const rawSrc = nativeVideoPlayer.getAttribute('src');
+    if (!detailModal.classList.contains('open') || !rawSrc || rawSrc === '' || nativeVideoPlayer.src === window.location.href) {
       return;
     }
 
@@ -282,25 +299,7 @@ function setupEventListeners() {
         case 4: message = 'Video stream source format not supported.'; break;
       }
       console.error(`Native video error [Code ${err.code}]: ${message}`, err);
-
-      // Automatic fallback to Server 1 (vidsrc.to) if IMDb ID is available
-      if (currentImdbId) {
-        console.log('Direct stream failed. Switching to Server 1 (vidsrc.to) fallback...');
-        const serverBtn = document.querySelector('#player-servers .server-btn[data-src-prefix]');
-        if (serverBtn) {
-          // Pause and clear native player immediately to prevent duplicate events
-          nativeVideoPlayer.pause();
-          nativeVideoPlayer.removeAttribute('src');
-          nativeVideoPlayer.load();
-          // Switch to Server 1
-          serverBtn.click();
-          showPlayerToast('Direct stream format not supported. Switching to Server 1...');
-        } else {
-          showPlayerToast(`Direct stream failed: ${message}`);
-        }
-      } else {
-        showPlayerToast(`Direct stream failed: ${message}`);
-      }
+      showPlayerToast(`Direct stream failed: ${message}`);
     }
   });
 }
@@ -564,25 +563,6 @@ async function openDetailsModal(detailId, posterUrl) {
       `;
     }
 
-    // Set up Video Player
-    let hasPlayer = false;
-    let streamOnline = movie.streamUrl ? true : false;
-
-    // Configure Native Player (Direct Stream)
-    if (movie.streamUrl && streamOnline) {
-      const resolvedStreamUrl = movie.streamUrl.startsWith('/api/') ? API_BASE_URL + movie.streamUrl : movie.streamUrl;
-      currentDirectStreamUrl = resolvedStreamUrl;
-      nativeVideoPlayer.src = resolvedStreamUrl;
-      nativeVideoPlayer.load();
-      directServerBtn.style.display = 'inline-block';
-      hasPlayer = true;
-    } else {
-      currentDirectStreamUrl = null;
-      nativeVideoPlayer.removeAttribute('src');
-      nativeVideoPlayer.load();
-      directServerBtn.style.display = 'none';
-    }
-
     let hasEpisodes = movie.downloads && movie.downloads.some(d => d.isEpisode);
     
     if (!hasEpisodes && isShow && movie.downloads && movie.downloads.length > 0) {
@@ -634,6 +614,27 @@ async function openDetailsModal(detailId, posterUrl) {
       epNavBar.style.display = 'none';
     }
 
+    // Set up Video Player
+    let hasPlayer = false;
+    let streamOnline = movie.streamUrl ? true : false;
+
+    // Configure Player (Direct Stream)
+    directServerBtn.style.display = 'inline-block';
+    if ((movie.streamUrl && streamOnline) || hasEpisodes) {
+      const resolvedStreamUrl = movie.streamUrl ? (movie.streamUrl.startsWith('/api/') ? API_BASE_URL + movie.streamUrl : movie.streamUrl) : '';
+      currentDirectStreamUrl = resolvedStreamUrl;
+      hasPlayer = true;
+      if (resolvedStreamUrl && !resolvedStreamUrl.includes('/api/netmirror-stream')) {
+        nativeVideoPlayer.src = resolvedStreamUrl;
+        nativeVideoPlayer.load();
+        nativeVideoPlayer.play().catch(e => console.log('Autoplay blocked:', e));
+      }
+    } else {
+      currentDirectStreamUrl = null;
+      nativeVideoPlayer.removeAttribute('src');
+      nativeVideoPlayer.load();
+    }
+
     if (movie.imdbId || hasEpisodes) {
       if (movie.imdbId) {
         currentImdbId = movie.imdbId;
@@ -667,10 +668,31 @@ async function openDetailsModal(detailId, posterUrl) {
       if (movie.streamUrl && streamOnline) {
         // Direct stream default (user preference)
         directServerBtn.classList.add('active');
-        iframePlayerWrapper.style.display = 'none';
-        videoPlayerIframe.src = '';
-        nativePlayerWrapper.style.display = 'block';
-        startDirectStreamWatchdog();
+        if (movie.streamUrl.includes('/api/netmirror-stream')) {
+          nativePlayerWrapper.style.display = 'none';
+          nativeVideoPlayer.removeAttribute('src');
+          nativeVideoPlayer.load();
+          iframePlayerWrapper.style.display = 'block';
+          const resolvedStreamUrl = movie.streamUrl.startsWith('/api/') ? API_BASE_URL + movie.streamUrl : movie.streamUrl;
+          fetch(resolvedStreamUrl)
+            .then(res => res.json())
+            .then(data => {
+              if (data.iframeUrl) {
+                videoPlayerIframe.src = data.iframeUrl.startsWith('/api/') ? API_BASE_URL + data.iframeUrl : data.iframeUrl;
+              }
+            })
+            .catch(err => console.error('Failed to load NetMirror movie stream:', err));
+        } else {
+          iframePlayerWrapper.style.display = 'none';
+          videoPlayerIframe.src = '';
+          nativePlayerWrapper.style.display = 'block';
+          if (currentDirectStreamUrl) {
+            nativeVideoPlayer.src = currentDirectStreamUrl;
+            nativeVideoPlayer.load();
+            nativeVideoPlayer.play().catch(e => console.log('Autoplay blocked:', e));
+          }
+          startDirectStreamWatchdog();
+        }
       } else if (currentImdbId) {
         // Fallback to first available iframe server
         const firstIframeBtn = document.querySelector('.server-btn[data-src-prefix]');
@@ -1235,17 +1257,17 @@ function startDirectStreamWatchdog() {
   directStreamWatchdog = setTimeout(() => {
     const activeBtn = document.querySelector('#player-servers .server-btn.active');
     if (activeBtn && activeBtn.id === 'server-btn-direct' && nativeVideoPlayer.paused) {
-      console.log('[Watchdog] Direct stream loading timed out. Swapping to Server 1...');
+      console.log('[Watchdog] Direct stream buffering timeout (180s) reached. Swapping to Server 1...');
       const serverBtn = document.querySelector('#player-servers .server-btn[data-src-prefix]');
       if (serverBtn) {
         nativeVideoPlayer.pause();
         nativeVideoPlayer.removeAttribute('src');
         nativeVideoPlayer.load();
         serverBtn.click();
-        showPlayerToast('Direct stream buffered slowly. Swapped to Server 1...');
+        showPlayerToast('Direct stream buffered slowly (exceeded 180s). Swapped to Server 1...');
       }
     }
-  }, 6000);
+  }, 180000); // 180 seconds buffering switch time
 }
 
 // Hook up native video playback watchdog clear states

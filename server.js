@@ -18,6 +18,17 @@ const PORT = process.env.PORT || 3000;
 
 app.use(cors());
 app.use(express.json());
+
+// Prevent index.html cache so versioned client scripts are loaded fresh
+app.get('/', (req, res, next) => {
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, private');
+  next();
+});
+app.get('/index.html', (req, res, next) => {
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, private');
+  next();
+});
+
 app.use(express.static(path.join(__dirname, 'public')));
 
 // const TARGET_BASE_URL = process.env.TARGET_BASE_URL || 'https://okjatt.bond';
@@ -104,25 +115,25 @@ function cleanMovieTitle(title) {
   return cleaned.replace(/\s+/g, ' ').trim();
 }
 
-// Helper to replace target site brandings with nikkXmovie
+// Helper to replace target site brandings with NIKK ❤️ POOJA
 function cleanTitleBranding(title) {
   if (!title) return '';
   return title
-    .replace(/okjatt\.bond\.com/gi, 'nikkXmovie')
-    .replace(/okjatt\.bond/gi, 'nikkXmovie')
-    .replace(/okjatthd\.bond/gi, 'nikkXmovie')
-    .replace(/okjatt\.in/gi, 'nikkXmovie')
-    .replace(/okjatt\.org/gi, 'nikkXmovie')
-    .replace(/okjatt/gi, 'nikkXmovie')
-    .replace(/vegamovie\.ss/gi, 'nikkXmovie')
-    .replace(/vegamovies/gi, 'nikkXmovie')
-    .replace(/vegamovie/gi, 'nikkXmovie')
-    .replace(/netmirror\.global/gi, 'nikkXmovie')
-    .replace(/netmirror/gi, 'nikkXmovie')
-    .replace(/\[OkJatt\]/gi, '[nikkXmovie]')
-    .replace(/\(OkJatt\)/gi, '(nikkXmovie)')
-    .replace(/\[NetMirror\]/gi, '[nikkXmovie]')
-    .replace(/\(NetMirror\)/gi, '(nikkXmovie)')
+    .replace(/okjatt\.bond\.com/gi, 'NIKK ❤️ POOJA')
+    .replace(/okjatt\.bond/gi, 'NIKK ❤️ POOJA')
+    .replace(/okjatthd\.bond/gi, 'NIKK ❤️ POOJA')
+    .replace(/okjatt\.in/gi, 'NIKK ❤️ POOJA')
+    .replace(/okjatt\.org/gi, 'NIKK ❤️ POOJA')
+    .replace(/okjatt/gi, 'NIKK ❤️ POOJA')
+    .replace(/vegamovie\.ss/gi, 'NIKK ❤️ POOJA')
+    .replace(/vegamovies/gi, 'NIKK ❤️ POOJA')
+    .replace(/vegamovie/gi, 'NIKK ❤️ POOJA')
+    .replace(/netmirror\.global/gi, 'NIKK ❤️ POOJA')
+    .replace(/netmirror/gi, 'NIKK ❤️ POOJA')
+    .replace(/\[OkJatt\]/gi, '[NIKK ❤️ POOJA]')
+    .replace(/\(OkJatt\)/gi, '(NIKK ❤️ POOJA)')
+    .replace(/\[NetMirror\]/gi, '[NIKK ❤️ POOJA]')
+    .replace(/\(NetMirror\)/gi, '(NIKK ❤️ POOJA)')
     .replace(/\s+/g, ' ')
     .trim();
 }
@@ -591,7 +602,8 @@ app.get('/api/movie-details', async (req, res) => {
       
       // Downloads/Streaming list builder
       const downloads = [];
-      if (item.season && item.season.length > 0) {
+      const isActualShow = item.season && item.season.length > 0 && !(item.season.length === 1 && item.season[0].se === 0 && item.season[0].ep === 0);
+      if (isActualShow) {
         // TV Show/Web Series
         item.season.forEach(s => {
           const seasonNum = s.se;
@@ -763,6 +775,27 @@ app.get('/api/movie-details', async (req, res) => {
           console.error('Error fetching IMDb ID for VegaMovie:', err.message);
         }
 
+        let streamUrl = null;
+        if (downloads && downloads.length > 0) {
+          const validDwd = downloads.find(d => {
+            try {
+              const base64Id = d.url.split('?id=')[1];
+              const rawUrl = Buffer.from(base64Id, 'base64').toString('utf8');
+              return rawUrl && !rawUrl.includes('.html');
+            } catch(e) {
+              return false;
+            }
+          });
+          
+          if (validDwd) {
+            try {
+              const base64Id = validDwd.url.split('?id=')[1];
+              const rawUrl = Buffer.from(base64Id, 'base64').toString('utf8');
+              streamUrl = `/api/stream-play?id=${Buffer.from(rawUrl).toString('base64')}`;
+            } catch(e) {}
+          }
+        }
+
         const result = {
           title: cleanTitleBranding(title),
           infoHtml: cleanTitleBranding(infoHtml),
@@ -774,7 +807,7 @@ app.get('/api/movie-details', async (req, res) => {
             isEpisode: d.isEpisode
           })),
           imdbId,
-          streamUrl: null
+          streamUrl: streamUrl
         };
 
         cache.details[detailUrl] = {
@@ -994,7 +1027,28 @@ app.get('/api/movie-details', async (req, res) => {
     }
 
     // Mask direct streamUrl
-    const maskedStreamUrl = streamUrl ? `/api/stream-play?id=${Buffer.from(streamUrl).toString('base64')}` : null;
+    let maskedStreamUrl = streamUrl ? `/api/stream-play?id=${Buffer.from(streamUrl).toString('base64')}` : null;
+    
+    // Fallback: if direct streamUrl is not found, extract from first available download link
+    if (!maskedStreamUrl && downloads && downloads.length > 0) {
+      const validDwd = downloads.find(d => {
+        try {
+          const base64Id = d.url.split('?id=')[1];
+          const rawUrl = Buffer.from(base64Id, 'base64').toString('utf8');
+          return rawUrl && !rawUrl.includes('.html');
+        } catch(e) {
+          return false;
+        }
+      });
+      
+      if (validDwd) {
+        try {
+          const base64Id = validDwd.url.split('?id=')[1];
+          const rawUrl = Buffer.from(base64Id, 'base64').toString('utf8');
+          maskedStreamUrl = `/api/stream-play?id=${Buffer.from(rawUrl).toString('base64')}`;
+        } catch(e) {}
+      }
+    }
 
     const result = {
       title: cleanTitleBranding(title),
@@ -1325,8 +1379,9 @@ app.get('/api/netmirror-stream', async (req, res) => {
   }
 });
 
-// Catch-all route to serve the SPA frontend
+// Catch-all route to serve the SPA frontend with caching disabled
 app.get('*', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, private');
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
