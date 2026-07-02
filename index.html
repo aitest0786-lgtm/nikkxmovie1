@@ -3,6 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="google-site-verification" content="XS6z5StKdmC4p_UBNSnqqUPERHnt7HU7oczJxyt0yZg" />
   <title>nikkXmovie - Premium Movie & Anime Portal</title>
   <!-- Google Fonts: Outfit & Inter -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -10,7 +11,9 @@
   <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
   <!-- FontAwesome Icons -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="style.css?v=2.2">
+  <!-- NXM Favicon Logo -->
+  <link rel="icon" type="image/png" href="/nxm_logo.png">
 </head>
 <body>
 
@@ -22,7 +25,7 @@
   <header>
     <div class="nav-container">
       <div class="logo">
-        <i class="fa-solid fa-play-css-neon fa-play"></i>
+        <img src="/nxm_logo.png" alt="NXM Logo" style="height: 36px; width: 36px; border-radius: 50%; object-fit: cover; border: 1.5px solid var(--accent-purple); box-shadow: 0 0 10px var(--accent-purple-glow); margin-right: 5px;">
         <span>nikk<span class="x-brand">X</span><span>movie</span></span>
       </div>
 
@@ -164,10 +167,10 @@
                  <div class="server-selector" id="player-servers">
                    <span class="server-selector-label"><i class="fa-solid fa-server"></i> Choose Server:</span>
                    <button class="server-btn" id="server-btn-direct" style="display: none;">Direct Stream (Premium)</button>
-                   <button class="server-btn" data-src-prefix="https://vidsrc.to/embed/movie/">Server 1 (Vidsrc.to)</button>
+                   <button class="server-btn" data-src-prefix="https://vidsrc.net/embed/movie/">Server 1 (Vidsrc.net)</button>
                    <button class="server-btn" data-src-prefix="https://vidsrc.cc/v2/embed/movie/">Server 2 (Vidsrc.cc)</button>
                    <button class="server-btn" data-src-prefix="https://player.autoembed.cc/embed/movie/">Server 3 (Autoembed)</button>
-                   <button class="server-btn" data-src-prefix="https://multiembed.mov/?video_id=">Server 4 (Multiembed)</button>
+                   <button class="server-btn" data-src-prefix="https://embed.su/embed/movie/">Server 4 (Embed.su)</button>
                  </div>
 
                  <!-- Aspect Ratio Selector -->
@@ -216,6 +219,6 @@
     </div>
   </footer>
 
-  <script src="app.js"></script>
+  <script src="app.js?v=2.2"></script>
 </body>
 </html>

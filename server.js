@@ -53,6 +53,9 @@ function cleanMovieTitle(title) {
   if (!title) return '';
   
   let cleaned = title;
+
+  // Replace target site names
+  cleaned = cleaned.replace(/okjatt\.bond\.com|okjatt\.bond|okjatthd\.bond|okjatt\.in|okjatt\.org|okjatt|vegamovie\.ss|vegamovies|nikkXmovie/gi, ' ');
   
   // Extract year if present, to keep it in the search query for accuracy
   let year = '';
@@ -62,12 +65,14 @@ function cleanMovieTitle(title) {
   }
   
   cleaned = cleaned
+    .replace(/\b(s\d+ep\d+|s\d+\s+ep\d+|season\s+\d+|seanon\s+\d+|seasons|season|episodes|episode|episode\s+\d+|ep\d+|series|all|full)\b/gi, ' ') // Remove season, series and episode details
     .replace(/\(.*?\)/g, ' ') // Remove parentheses contents
     .replace(/\[.*?\]/g, ' ') // Remove brackets contents
     .replace(/\{.*?\}/g, ' ') // Remove braces contents
-    .replace(/480p|720p|1080p|2160p|4k|hd|web-dl|webrip|hdtc|hdtv|camrip|telesync|tc|ts|rip/gi, ' ')
-    .replace(/hindi|english|tamil|telugu|malayalam|kannada|punjabi|odia|bangali|gujarati|marathi|korean|chinese|urdu|multi-audio|dual-audio|org|dubbed|hq|dub/gi, ' ')
-    .replace(/full movie|uncut|extended|directors cut|season \d+|s\d+ ep\d+|episodes? \d+/gi, ' ')
+    .replace(/\b(480p|720p|1080p|2160p|4k|hd|web-dl|webrip|hdtc|hdtv|camrip|telesync|tc|ts|rip)\b/gi, ' ')
+    .replace(/\b(hindi|english|tamil|telugu|malayalam|kannada|punjabi|odia|bangali|gujarati|marathi|korean|chinese|urdu|multi-audio|dual-audio|org|dubbed|hq|dub|dual|audio|esub|mkv|mp4|download|watch|online)\b/gi, ' ')
+    .replace(/\b(full movie|uncut|extended|directors cut|complete|bootstrap)\b/gi, ' ')
+    .replace(/\b(web series|webseries|tv show|tvshow|watch free)\b/gi, ' ')
     .replace(/[\-|\|]/g, ' ') // Replace punctuation with space
     .replace(/\s+/g, ' ') // Collapse spaces
     .trim();
@@ -77,6 +82,25 @@ function cleanMovieTitle(title) {
   }
   
   return cleaned.replace(/\s+/g, ' ').trim();
+}
+
+// Helper to replace target site brandings with nikkXmovie
+function cleanTitleBranding(title) {
+  if (!title) return '';
+  return title
+    .replace(/okjatt\.bond\.com/gi, 'nikkXmovie')
+    .replace(/okjatt\.bond/gi, 'nikkXmovie')
+    .replace(/okjatthd\.bond/gi, 'nikkXmovie')
+    .replace(/okjatt\.in/gi, 'nikkXmovie')
+    .replace(/okjatt\.org/gi, 'nikkXmovie')
+    .replace(/okjatt/gi, 'nikkXmovie')
+    .replace(/vegamovie\.ss/gi, 'nikkXmovie')
+    .replace(/vegamovies/gi, 'nikkXmovie')
+    .replace(/vegamovie/gi, 'nikkXmovie')
+    .replace(/\[OkJatt\]/gi, '[nikkXmovie]')
+    .replace(/\(OkJatt\)/gi, '(nikkXmovie)')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 // Fetch IMDb ID using official IMDb suggestions API (extremely fast and reliable)
@@ -158,8 +182,14 @@ app.get('/api/movies', async (req, res) => {
         : `${TARGET_BASE_URL}/`;
     }
 
-    const html = await fetchHtml(url);
-    const $ = cheerio.load(html);
+    let html = '';
+    try {
+      html = await fetchHtml(url);
+    } catch(e) {
+      console.error(`Failed to fetch main category URL: ${url}`, e.message);
+    }
+    
+    const $ = cheerio.load(html || '');
     const movies = [];
 
     // Parse logic supporting various styles
@@ -178,7 +208,7 @@ app.get('/api/movies', async (req, res) => {
         const absoluteDetailUrl = href.startsWith('http') ? href : new URL(href, TARGET_BASE_URL).href;
         const absolutePoster = poster ? (poster.startsWith('http') ? poster : new URL(poster, TARGET_BASE_URL).href) : '';
         movies.push({
-          title,
+          title: cleanTitleBranding(title),
           detailId: Buffer.from(absoluteDetailUrl).toString('base64'),
           poster: absolutePoster
         });
@@ -207,7 +237,7 @@ app.get('/api/movies', async (req, res) => {
           const absoluteDetailUrl = href.startsWith('http') ? href : new URL(href, TARGET_BASE_URL).href;
           const absolutePoster = poster ? (poster.startsWith('http') ? poster : new URL(poster, TARGET_BASE_URL).href) : '';
           movies.push({
-            title,
+            title: cleanTitleBranding(title),
             detailId: Buffer.from(absoluteDetailUrl).toString('base64'),
             poster: absolutePoster
           });
@@ -230,13 +260,71 @@ app.get('/api/movies', async (req, res) => {
           const absoluteDetailUrl = href.startsWith('http') ? href : new URL(href, TARGET_BASE_URL).href;
           const absolutePoster = poster ? (poster.startsWith('http') ? poster : new URL(poster, TARGET_BASE_URL).href) : '';
           movies.push({
-            title,
+            title: cleanTitleBranding(title),
             detailId: Buffer.from(absoluteDetailUrl).toString('base64'),
             poster: absolutePoster
           });
         }
       });
     }
+
+    // Background Integration: Fetch and merge Vegamovies results
+    let vegaMovies = [];
+    if (search) {
+      try {
+        console.log(`[Vega Scraper] Background search for: "${search}"`);
+        const vegaHtml = await fetchHtml(`https://vegamovie.ss/?s=${encodeURIComponent(search)}`);
+        const $vega = cheerio.load(vegaHtml);
+        $vega('article, .post-item, .blog-post, .post').each((i, el) => {
+          const titleEl = $vega(el).find('h2 a, h3 a, a').first();
+          const href = titleEl.attr('href');
+          const title = titleEl.text().trim() || $vega(el).find('img').attr('alt') || '';
+          const imgEl = $vega(el).find('img').first();
+          let poster = imgEl.attr('src') || imgEl.attr('data-src') || imgEl.attr('data-lazy-src') || '';
+
+          if (href && title) {
+            const absoluteDetailUrl = href.startsWith('http') ? href : new URL(href, 'https://vegamovie.ss').href;
+            const absolutePoster = poster ? (poster.startsWith('http') ? poster : new URL(poster, 'https://vegamovie.ss').href) : '';
+            vegaMovies.push({
+              title: cleanTitleBranding(title),
+              detailId: Buffer.from(absoluteDetailUrl).toString('base64'),
+              poster: absolutePoster
+            });
+          }
+        });
+      } catch (e) {
+        console.error("Failed to query Vegamovies in background:", e.message);
+      }
+    } else if (!category && page === 1) {
+      // Merging Vegamovies homepage items into main list
+      try {
+        console.log(`[Vega Scraper] Background loading homepage items`);
+        const vegaHtml = await fetchHtml('https://vegamovie.ss/');
+        const $vega = cheerio.load(vegaHtml);
+        $vega('article, .post-item, .blog-post, .post').each((i, el) => {
+          const titleEl = $vega(el).find('h2 a, h3 a, a').first();
+          const href = titleEl.attr('href');
+          const title = titleEl.text().trim() || $vega(el).find('img').attr('alt') || '';
+          const imgEl = $vega(el).find('img').first();
+          let poster = imgEl.attr('src') || imgEl.attr('data-src') || imgEl.attr('data-lazy-src') || '';
+
+          if (href && title) {
+            const absoluteDetailUrl = href.startsWith('http') ? href : new URL(href, 'https://vegamovie.ss').href;
+            const absolutePoster = poster ? (poster.startsWith('http') ? poster : new URL(poster, 'https://vegamovie.ss').href) : '';
+            vegaMovies.push({
+              title: cleanTitleBranding(title),
+              detailId: Buffer.from(absoluteDetailUrl).toString('base64'),
+              poster: absolutePoster
+            });
+          }
+        });
+      } catch (e) {
+        console.error("Failed to query Vegamovies homepage:", e.message);
+      }
+    }
+
+    // Merge lists
+    const finalMoviesList = [...movies, ...vegaMovies];
 
     // Check pagination
     let hasNextPage = false;
@@ -250,14 +338,13 @@ app.get('/api/movies', async (req, res) => {
           hasNextPage = true;
         }
       } else {
-        hasNextPage = movies.length >= 10;
+        hasNextPage = finalMoviesList.length >= 10;
       }
     } else {
-      // Home page page 1 has next pages (since page 2 will fall back to Hindi category page 2)
       hasNextPage = true;
     }
 
-    const result = { movies, page, hasNextPage };
+    const result = { movies: finalMoviesList, page, hasNextPage };
 
     // Cache the result
     cache.list[cacheKey] = {
@@ -284,15 +371,149 @@ app.get('/api/movie-details', async (req, res) => {
   } catch (e) {
     return res.status(400).json({ error: 'Invalid movie ID format' });
   }
-
   const cachedData = cache.details[detailUrl];
   if (cachedData && (Date.now() - cachedData.timestamp < cache.CACHE_DURATION)) {
     return res.json(cachedData.data);
   }
-
   try {
-    const html = await fetchHtml(detailUrl);
-    const $ = cheerio.load(html);
+    let html = await fetchHtml(detailUrl);
+    let $ = cheerio.load(html);
+
+    // Vegamovies details scraper integration
+    const isVega = detailUrl.includes('vegamovie.ss');
+    if (isVega) {
+      const title = $('h1').text().trim();
+      
+      // Extract screenshots
+      const screenshots = [];
+      $('img').each((i, el) => {
+        let imgUrl = $(el).attr('src') || $(el).attr('data-src') || $(el).attr('data-lazy-src');
+        if (imgUrl && imgUrl.includes('/uploads/') && imgUrl.toLowerCase().includes('screenshot')) {
+          if (!imgUrl.startsWith('http')) {
+            imgUrl = new URL(imgUrl, detailUrl).href;
+          }
+          screenshots.push(imgUrl);
+        }
+      });
+      
+      // Extract synopsis/plot
+      let plot = '';
+      $('p').each((i, el) => {
+        const txt = $(el).text().trim();
+        if (txt && txt.length > 80 && !txt.includes('vegamovie') && !txt.includes('Prefect Spot') && !txt.includes('G-Drive') && !txt.includes('Quality:')) {
+          plot = txt;
+          return false;
+        }
+      });
+      if (!plot) plot = 'No synopsis found for this release.';
+      
+      // Extract info html specs
+      let infoHtml = '';
+      $('p').each((i, el) => {
+        const txt = $(el).text().trim();
+        if (txt && (txt.includes('Web-Series Name:') || txt.includes('Movie Name:') || txt.includes('Release Year:') || txt.includes('Format:'))) {
+          infoHtml += txt.replace(/\n/g, '<br>') + '<br>';
+        }
+      });
+
+      // Extract downloads
+      const downloads = [];
+      $('.download-links-div').each((i, div) => {
+        $(div).find('a').each((j, el) => {
+          const href = $(el).attr('href');
+          if (!href) return;
+          
+          let label = '';
+          let prev = $(el).closest('h3, div, p').prev();
+          while (prev.length > 0) {
+            const txt = prev.text().trim();
+            if (txt && (txt.includes('480p') || txt.includes('720p') || txt.includes('1080p') || txt.includes('Quality'))) {
+              label = txt;
+              break;
+            }
+            prev = prev.prev();
+          }
+          
+          if (!label) {
+            label = $(div).find('h3').first().text().trim() || 'Download Link';
+          }
+          
+          const title = `Download ${label}`;
+          const maskedUrl = `/api/download?id=${Buffer.from(href).toString('base64')}`;
+          downloads.push({
+            title: title,
+            url: maskedUrl,
+            isEpisode: false
+          });
+        });
+      });
+      
+      // Fallback parser if downloads is empty
+      if (downloads.length === 0) {
+        $('a').each((i, el) => {
+          const href = $(el).attr('href');
+          let text = $(el).text().trim().replace(/\s+/g, ' ');
+          if (href && (href.includes('nexdrive') || href.includes('v-cloud') || href.includes('howtoblog') || href.includes('drive') || text.includes('Download'))) {
+            if (!text || text.length < 5 || text.includes('[]')) {
+              text = $(el).attr('title') || 'Download Link';
+            }
+            const maskedUrl = `/api/download?id=${Buffer.from(href).toString('base64')}`;
+            downloads.push({
+              title: text,
+              url: maskedUrl,
+              isEpisode: false
+            });
+          }
+        });
+      }
+
+      // Resolve IMDb ID
+      let imdbId = null;
+      try {
+        imdbId = await getImdbIdByTitle(title);
+      } catch (err) {
+        console.error('Error fetching IMDb ID for VegaMovie:', err.message);
+      }
+
+      const result = {
+        title: cleanTitleBranding(title),
+        infoHtml: cleanTitleBranding(infoHtml),
+        plot: cleanTitleBranding(plot),
+        screenshots: screenshots.slice(0, 8),
+        downloads: downloads.map(d => ({
+          title: cleanTitleBranding(d.title),
+          url: d.url,
+          isEpisode: d.isEpisode
+        })),
+        imdbId,
+        streamUrl: null
+      };
+
+      cache.details[detailUrl] = {
+        timestamp: Date.now(),
+        data: result
+      };
+
+      return res.json(result);
+    }
+
+    // If it's a TV series intermediate page, resolve it to the complete page URL
+    if (detailUrl.includes('/tv/') && detailUrl.endsWith('-full.html')) {
+      let completeUrl = null;
+      $('a').each((i, el) => {
+        const href = $(el).attr('href');
+        if (href && href.includes('-complete.html')) {
+          completeUrl = href.startsWith('http') ? href : new URL(href, detailUrl).href;
+          return false; // break loop
+        }
+      });
+      if (completeUrl) {
+        console.log(`[Scraper] Resolving intermediate series page: ${detailUrl} -> ${completeUrl}`);
+        detailUrl = completeUrl;
+        html = await fetchHtml(detailUrl);
+        $ = cheerio.load(html);
+      }
+    }
 
     const title = $('.meta-data-title h1, h1').text().trim();
 
@@ -330,6 +551,16 @@ app.get('/api/movie-details', async (req, res) => {
     }
     if (!plot) {
       plot = $('.entry-content p').text().trim();
+    }
+    if (!plot) {
+      // Find plot in paragraphs that are not part of header/footer
+      $('p').each((i, el) => {
+        const txt = $(el).text().trim();
+        if (txt && txt.length > 50 && !txt.includes('HTML5 video') && !txt.includes('Online play') && !txt.includes('watch on')) {
+          plot = txt;
+          return false;
+        }
+      });
     }
     if (!plot) {
       plot = 'No synopsis found for this release.';
@@ -403,7 +634,8 @@ app.get('/api/movie-details', async (req, res) => {
             const maskedUrl = `/api/download?id=${Buffer.from(href).toString('base64')}`;
             downloads.push({
               title: text,
-              url: maskedUrl
+              url: maskedUrl,
+              isEpisode: false
             });
           }
         });
@@ -416,10 +648,11 @@ app.get('/api/movie-details', async (req, res) => {
     if (downloads.length === 0) {
       $('a').each((i, el) => {
         let href = $(el).attr('href');
-        if (href && !href.includes('.html') && (href.includes('checkyourlinks') || href.includes('cdn') || href.includes('.mp4') || href.includes('download') || href.includes('lnk-lnk'))) {
+        const isTvEpisode = href && href.includes('/tv/') && href.includes('-download-') && href.endsWith('.html');
+        if (href && (isTvEpisode || (!href.includes('.html') && (href.includes('checkyourlinks') || href.includes('cdn') || href.includes('.mp4') || href.includes('download') || href.includes('lnk-lnk'))))) {
           let text = $(el).text().trim().replace(/\s+/g, ' ');
           if (!text || text.length < 5) {
-            text = 'Download Movie';
+            text = isTvEpisode ? 'Download Episode' : 'Download Movie';
           }
           if (!href.startsWith('http')) {
             href = new URL(href, detailUrl).href;
@@ -435,7 +668,8 @@ app.get('/api/movie-details', async (req, res) => {
           const maskedUrl = `/api/download?id=${Buffer.from(href).toString('base64')}`;
           downloads.push({
             title: text,
-            url: maskedUrl
+            url: maskedUrl,
+            isEpisode: isTvEpisode
           });
         }
       });
@@ -472,11 +706,15 @@ app.get('/api/movie-details', async (req, res) => {
     const maskedStreamUrl = streamUrl ? `/api/stream-play?id=${Buffer.from(streamUrl).toString('base64')}` : null;
 
     const result = {
-      title,
-      infoHtml,
-      plot,
+      title: cleanTitleBranding(title),
+      infoHtml: cleanTitleBranding(infoHtml),
+      plot: cleanTitleBranding(plot),
       screenshots: screenshots.slice(0, 8), // limit to 8 screenshots
-      downloads,
+      downloads: downloads.map(d => ({
+        title: cleanTitleBranding(d.title),
+        url: d.url,
+        isEpisode: d.isEpisode
+      })),
       imdbId,
       streamUrl: maskedStreamUrl
     };
@@ -490,6 +728,64 @@ app.get('/api/movie-details', async (req, res) => {
   } catch (error) {
     console.error("Error in /api/movie-details:", error);
     res.status(500).json({ error: 'Failed to parse movie details', details: error.message });
+  }
+});
+
+// 2b. API: Fetch direct masked stream url for any episode on demand
+app.get('/api/episode-stream', async (req, res) => {
+  const episodeId = req.query.id;
+  if (!episodeId) {
+    return res.status(400).json({ error: 'Missing episode ID' });
+  }
+
+  try {
+    let episodeUrl = Buffer.from(episodeId, 'base64').toString('utf8');
+    if (episodeUrl.startsWith('/')) {
+      episodeUrl = new URL(episodeUrl, TARGET_BASE_URL).href;
+    }
+
+    console.log(`[Scraper] Fetching direct stream URL for episode: ${episodeUrl}`);
+    const html = await fetchHtml(episodeUrl);
+    const $ = cheerio.load(html);
+
+    let streamUrl = null;
+    $('video source').each((i, el) => {
+      const src = $(el).attr('src');
+      if (src && src.includes('.mp4')) {
+        streamUrl = src;
+        return false;
+      }
+    });
+
+    if (!streamUrl) {
+      $('video').each((i, el) => {
+        const src = $(el).attr('src');
+        if (src && src.includes('.mp4')) {
+          streamUrl = src;
+          return false;
+        }
+      });
+    }
+
+    if (!streamUrl) {
+      $('a').each((i, el) => {
+        const href = $(el).attr('href');
+        if (href && href.includes('.mp4')) {
+          streamUrl = href;
+          return false;
+        }
+      });
+    }
+
+    if (streamUrl) {
+      const maskedStreamUrl = `/api/stream-play?id=${Buffer.from(streamUrl).toString('base64')}`;
+      return res.json({ streamUrl: maskedStreamUrl });
+    }
+
+    res.status(404).json({ error: 'Direct video stream URL could not be resolved from this episode page' });
+  } catch (error) {
+    console.error("Error in /api/episode-stream:", error.message);
+    res.status(500).json({ error: 'Failed to resolve episode stream', details: error.message });
   }
 });
 
@@ -725,17 +1021,9 @@ app.get('/api/stream-play', async (req, res) => {
       // Request aborted by client, no need to log or redirect
       return;
     }
-    console.error('Streaming proxy error, falling back to direct redirect:', error.message);
-    try {
-      let originalUrl = Buffer.from(maskedId, 'base64').toString('utf8');
-      if (originalUrl.startsWith('/')) {
-        originalUrl = new URL(originalUrl, TARGET_BASE_URL).href;
-      }
-      res.redirect(originalUrl);
-    } catch (fallbackErr) {
-      if (!res.headersSent) {
-        res.status(500).send('Error proxying stream URL');
-      }
+    console.error('Streaming proxy error (failing fast):', error.message);
+    if (!res.headersSent) {
+      res.status(500).send('Streaming proxy error: ' + error.message);
     }
   }
 });

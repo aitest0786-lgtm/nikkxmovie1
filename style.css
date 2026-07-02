@@ -805,6 +805,29 @@ header {
   transform: scale(1.02);
 }
 
+/* Play Episode Button Styling */
+.play-ep-btn {
+  background: linear-gradient(135deg, var(--accent-cyan), #00b4d8);
+  color: #07060b;
+  border: none;
+  border-radius: 20px;
+  padding: 8px 18px;
+  font-size: 0.85rem;
+  font-weight: 700;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-display);
+  transition: var(--transition-smooth);
+}
+
+.play-ep-btn:hover {
+  box-shadow: 0 0 10px rgba(0, 242, 254, 0.4);
+  transform: scale(1.02);
+  color: #07060b;
+}
+
 /* Footer layout */
 footer {
   border-top: 1px solid var(--border-color);
