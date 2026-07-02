@@ -566,29 +566,7 @@ async function openDetailsModal(detailId, posterUrl) {
 
     // Set up Video Player
     let hasPlayer = false;
-    let streamOnline = false;
-
-    // Verify direct stream availability in background (to prevent video element native error dialogs)
-    if (movie.streamUrl) {
-      try {
-        const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 2000); // 2 second timeout limit
-        
-        const resolvedStreamUrl = movie.streamUrl.startsWith('/api/') ? API_BASE_URL + movie.streamUrl : movie.streamUrl;
-        const check = await fetch(resolvedStreamUrl, {
-          method: 'GET',
-          headers: { 'Range': 'bytes=0-0' }, // request first byte only
-          signal: controller.signal
-        });
-        clearTimeout(timeout);
-        
-        if (check.ok || check.status === 206) {
-          streamOnline = true;
-        }
-      } catch (err) {
-        console.log('Direct stream is offline or unsupported:', err.message);
-      }
-    }
+    let streamOnline = movie.streamUrl ? true : false;
 
     // Configure Native Player (Direct Stream)
     if (movie.streamUrl && streamOnline) {

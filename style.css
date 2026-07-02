@@ -163,6 +163,32 @@ header {
   background: rgba(255, 255, 255, 0.07);
 }
 
+.search-category-select {
+  background: transparent;
+  color: var(--text-main);
+  border: none;
+  outline: none;
+  margin-right: 10px;
+  cursor: pointer;
+  font-size: 0.85rem;
+  font-family: var(--font-sans);
+  padding-right: 18px;
+  border-right: 1px solid rgba(255, 255, 255, 0.15);
+  max-width: 120px;
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='rgba(248, 249, 250, 0.7)' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 2px center;
+  background-size: 12px;
+}
+
+.search-category-select option {
+  background: #0f0a14;
+  color: var(--text-main);
+}
+
 .search-box input {
   background: transparent;
   border: none;
@@ -942,6 +968,19 @@ footer {
 
   .search-box {
     max-width: 100%;
+    padding: 4px 6px 4px 12px;
+  }
+
+  .search-category-select {
+    max-width: 85px;
+    font-size: 0.78rem;
+    padding-right: 12px;
+    margin-right: 6px;
+    background-position: right 0px center;
+  }
+
+  .search-box input {
+    font-size: 0.88rem;
   }
 
   .badge {

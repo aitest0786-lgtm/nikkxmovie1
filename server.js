@@ -5,6 +5,7 @@ const cheerio = require('cheerio');
 const cors = require('cors');
 const https = require('https');
 const path = require('path');
+const crypto = require('crypto');
 
 const httpsAgent = new https.Agent({ rejectUnauthorized: false });
 
@@ -32,12 +33,18 @@ const cache = {
 // Helper function to fetch page content with standard user-agent headers
 async function fetchHtml(url) {
   try {
+    let referer = TARGET_BASE_URL + '/';
+    try {
+      const urlObj = new URL(url);
+      referer = `${urlObj.protocol}//${urlObj.hostname}/`;
+    } catch(e) {}
+
     const response = await axios.get(url, {
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
         'Accept-Language': 'en-US,en;q=0.5',
-        'Referer': TARGET_BASE_URL + '/'
+        'Referer': referer
       },
       timeout: 25000,
       httpsAgent: httpsAgent
@@ -1054,7 +1061,7 @@ app.get('/api/episode-stream', async (req, res) => {
     if (!streamUrl) {
       $('a').each((i, el) => {
         const href = $(el).attr('href');
-        if (href && href.includes('.mp4')) {
+        if (href && !href.includes('.html') && (href.includes('checkyourlinks') || href.includes('cdn') || href.includes('.mp4') || href.includes('download') || href.includes('lnk-lnk'))) {
           streamUrl = href;
           return false;
         }
@@ -1062,6 +1069,15 @@ app.get('/api/episode-stream', async (req, res) => {
     }
 
     if (streamUrl) {
+      // Auto append index.php to query-only checkyourlinks URL to prevent FastCGI errors
+      try {
+        const urlObj = new URL(streamUrl);
+        if (urlObj.hostname.includes('checkyourlinks') && (urlObj.pathname === '/' || urlObj.pathname === '')) {
+          urlObj.pathname = '/index.php';
+          streamUrl = urlObj.href;
+        }
+      } catch(e) {}
+
       const maskedStreamUrl = `/api/stream-play?id=${Buffer.from(streamUrl).toString('base64')}`;
       return res.json({ streamUrl: maskedStreamUrl });
     }
@@ -1205,21 +1221,72 @@ app.get('/api/stream-play', async (req, res) => {
       originalUrl = new URL(originalUrl, TARGET_BASE_URL).href;
     }
 
-    // Force HTTPS for checkyourlinks.shop as port 80/HTTP times out/fails due to Cloudflare block
-    if (originalUrl.startsWith('http://') && (originalUrl.includes('checkyourlinks') || originalUrl.includes('cdn') || originalUrl.includes('netmirror'))) {
-      originalUrl = originalUrl.replace('http://', 'https://');
+    console.log(`[Proxy Stream] Streaming from CDN: ${originalUrl}`);
+
+    const range = req.headers.range;
+    const requestHeaders = {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
+    };
+
+    // Extract hostname for referrer to prevent hotlinking blocks
+    try {
+      const urlObj = new URL(originalUrl);
+      const refererHost = urlObj.searchParams.get('d') || urlObj.hostname;
+      requestHeaders['Referer'] = `https://${refererHost}/`;
+    } catch (e) {
+      requestHeaders['Referer'] = 'https://netmirror.global/';
     }
 
-    if (originalUrl.startsWith('http://') || originalUrl.startsWith('https://')) {
-      // Redirect directly to original stream CDN link so that browser loads video instantly and fast
-      return res.redirect(originalUrl);
-    } else {
-      res.status(400).send('Malformed stream URL');
+    if (range) {
+      requestHeaders['Range'] = range;
     }
+
+    const response = await axios({
+      method: 'get',
+      url: originalUrl,
+      responseType: 'stream',
+      headers: requestHeaders,
+      timeout: 30000,
+      httpsAgent: httpsAgent
+    });
+
+    // Set appropriate status
+    res.status(response.status);
+
+    // Copy range and file-related headers from target to client response
+    const headersToForward = [
+      'content-range',
+      'accept-ranges',
+      'content-length',
+      'content-type',
+      'content-disposition',
+      'cache-control'
+    ];
+
+    headersToForward.forEach(header => {
+      if (response.headers[header]) {
+        res.setHeader(header, response.headers[header]);
+      }
+    });
+
+    // Ensure accept-ranges is set
+    if (!res.getHeader('accept-ranges')) {
+      res.setHeader('Accept-Ranges', 'bytes');
+    }
+
+    // Pipe the response data stream directly to the express response
+    response.data.pipe(res);
+
+    // Handle connection close by client (e.g. paused/seeked video)
+    req.on('close', () => {
+      if (response.data && response.data.destroy) {
+        response.data.destroy();
+      }
+    });
   } catch (error) {
-    console.error('Streaming redirect error:', error.message);
+    console.error('Streaming proxy error:', error.message);
     if (!res.headersSent) {
-      res.status(500).send('Streaming redirect error: ' + error.message);
+      res.status(500).send('Streaming error: ' + error.message);
     }
   }
 });
