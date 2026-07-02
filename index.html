@@ -31,6 +31,13 @@
 
       <!-- Search Bar -->
       <div class="search-box">
+        <select id="search-category" style="background: transparent; color: var(--text-main); border: none; outline: none; margin-right: 10px; cursor: pointer; font-size: 0.85rem; font-family: var(--font-sans); padding-right: 5px; border-right: 1px solid rgba(255,255,255,0.1); max-width: 100px;">
+          <option value="all" style="background: var(--bg-dark); color: var(--text-main);">All</option>
+          <option value="movies" style="background: var(--bg-dark); color: var(--text-main);">Movies</option>
+          <option value="web-series" style="background: var(--bg-dark); color: var(--text-main);">Web Series</option>
+          <option value="tv-show" style="background: var(--bg-dark); color: var(--text-main);">TV Shows</option>
+          <option value="anime" style="background: var(--bg-dark); color: var(--text-main);">Anime</option>
+        </select>
         <input type="text" id="search-input" placeholder="Search movies, anime, series...">
         <button id="search-btn" aria-label="Search"><i class="fa-solid fa-magnifying-glass"></i></button>
       </div>

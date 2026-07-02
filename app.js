@@ -10,6 +10,7 @@ const API_BASE_URL = (
 let currentPage = 1;
 let currentCategory = '';
 let currentSearch = '';
+let currentSearchCategory = 'all';
 let hasNextPage = false;
 let firstMovieOnPage = null;
 let currentImdbId = null;
@@ -310,24 +311,27 @@ function scrollToMoviesSection() {
 
 function performSearch() {
   const query = searchInput.value.trim();
+  const searchCat = document.getElementById('search-category') ? document.getElementById('search-category').value : 'all';
   if (query) {
     currentSearch = query;
     currentCategory = '';
     currentPage = 1;
+    currentSearchCategory = searchCat;
 
     // Deselect category buttons
     catButtons.forEach(b => b.classList.remove('active'));
 
-    document.getElementById('section-title').innerHTML = `<i class="fa-solid fa-magnifying-glass"></i> Search Results for: "${query}"`;
-    loadMovies();
+    document.getElementById('section-title').innerHTML = `<i class="fa-solid fa-magnifying-glass"></i> Search Results for: "${query}" (${searchCat === 'all' ? 'All Categories' : searchCat})`;
+    loadMovies(searchCat);
   }
 }
 
 // Load Movies list from Express Server API
-async function loadMovies() {
+async function loadMovies(searchCat = 'all') {
+  currentSearchCategory = searchCat;
   showLoader();
   try {
-    const url = `${API_BASE_URL}/api/movies?page=${currentPage}&s=${encodeURIComponent(currentSearch)}&category=${currentCategory}`;
+    const url = `${API_BASE_URL}/api/movies?page=${currentPage}&s=${encodeURIComponent(currentSearch)}&category=${currentCategory}&search_category=${currentSearchCategory}`;
     const response = await fetch(url);
     
     if (!response.ok) {
@@ -956,12 +960,26 @@ async function playEpisode(epUrl, epTitle) {
 
   if (serverId === 'server-btn-direct') {
     try {
-      const epId = epUrl.split('?id=')[1];
-      const res = await fetch(`${API_BASE_URL}/api/episode-stream?id=${epId}`);
+      let fetchUrl = '';
+      if (epUrl.includes('/api/netmirror-stream')) {
+        fetchUrl = epUrl;
+      } else {
+        const epId = epUrl.split('?id=')[1] || btoa(epUrl);
+        fetchUrl = `${API_BASE_URL}/api/episode-stream?id=${epId}`;
+      }
+      
+      const res = await fetch(fetchUrl.startsWith('http') ? fetchUrl : API_BASE_URL + fetchUrl);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       
-      if (data.streamUrl) {
+      if (data.iframeUrl) {
+        nativePlayerWrapper.style.display = 'none';
+        nativeVideoPlayer.removeAttribute('src');
+        nativeVideoPlayer.load();
+        iframePlayerWrapper.style.display = 'block';
+        const resolvedIframeUrl = data.iframeUrl.startsWith('/api/') ? API_BASE_URL + data.iframeUrl : data.iframeUrl;
+        videoPlayerIframe.src = resolvedIframeUrl;
+      } else if (data.streamUrl) {
         iframePlayerWrapper.style.display = 'none';
         videoPlayerIframe.src = '';
         nativePlayerWrapper.style.display = 'block';

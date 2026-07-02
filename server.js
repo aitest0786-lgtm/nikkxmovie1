@@ -19,7 +19,8 @@ app.use(cors());
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
-const TARGET_BASE_URL = process.env.TARGET_BASE_URL || 'https://okjatt.bond';
+// const TARGET_BASE_URL = process.env.TARGET_BASE_URL || 'https://okjatt.bond';
+const TARGET_BASE_URL = process.env.TARGET_BASE_URL || 'https://netmirror.global';
 
 // Simple in-memory cache to make page loading super fast and avoid rate limiting
 const cache = {
@@ -54,6 +55,9 @@ function resolveOkJattUrl(url) {
   if (url.includes('okjatt') && !url.includes('okjatt.bond')) {
     return url.replace(/okjatthd\.bond|okjatt\.bond\.com|okjatt\.in|okjatt\.org|okjatt\.com|okjatt\.vip/gi, 'okjatt.bond');
   }
+  if (url.includes('netmirror') && !url.includes('netmirror.global')) {
+    return url.replace(/netmirror\.site|netmirror\.co|netmirror\.xyz|netmirror\.cc/gi, 'netmirror.global');
+  }
   return url;
 }
 
@@ -64,7 +68,7 @@ function cleanMovieTitle(title) {
   let cleaned = title;
 
   // Replace target site names
-  cleaned = cleaned.replace(/okjatt\.bond\.com|okjatt\.bond|okjatthd\.bond|okjatt\.in|okjatt\.org|okjatt|vegamovie\.ss|vegamovies|nikkXmovie/gi, ' ');
+  cleaned = cleaned.replace(/okjatt\.bond\.com|okjatt\.bond|okjatthd\.bond|okjatt\.in|okjatt\.org|okjatt|vegamovie\.ss|vegamovies|nikkXmovie|netmirror\.global|netmirror/gi, ' ');
   
   // Extract year if present, to keep it in the search query for accuracy
   let year = '';
@@ -106,8 +110,12 @@ function cleanTitleBranding(title) {
     .replace(/vegamovie\.ss/gi, 'nikkXmovie')
     .replace(/vegamovies/gi, 'nikkXmovie')
     .replace(/vegamovie/gi, 'nikkXmovie')
+    .replace(/netmirror\.global/gi, 'nikkXmovie')
+    .replace(/netmirror/gi, 'nikkXmovie')
     .replace(/\[OkJatt\]/gi, '[nikkXmovie]')
     .replace(/\(OkJatt\)/gi, '(nikkXmovie)')
+    .replace(/\[NetMirror\]/gi, '[nikkXmovie]')
+    .replace(/\(NetMirror\)/gi, '(nikkXmovie)')
     .replace(/\s+/g, ' ')
     .trim();
 }
@@ -191,14 +199,34 @@ async function scrapeVegaCategory(category, page) {
   return items;
 }
 
+// Helper to classify search items for categories
+function getCategoryOfItem(item) {
+  const titleLower = item.title.toLowerCase();
+  if (titleLower.includes('anime')) {
+    return 'anime';
+  }
+  if (titleLower.includes('season') || 
+      titleLower.includes('episode') || 
+      titleLower.includes('ep-') ||
+      /\bep\d+/i.test(titleLower) ||
+      /\bs\d+/i.test(titleLower) ||
+      titleLower.includes('web series') ||
+      titleLower.includes('complete') ||
+      item.media_type === 'tv') {
+    return 'web-series';
+  }
+  return 'movies';
+}
+
 // 1. API: List movies (Home, Categories, Search)
 app.get('/api/movies', async (req, res) => {
   const page = parseInt(req.query.page) || 1;
   const search = req.query.s || '';
   const category = req.query.category || '';
+  const searchCategory = req.query.search_category || 'all';
 
   // Generate a unique cache key based on query params
-  const cacheKey = `list-p${page}-s${search}-c${category}`;
+  const cacheKey = `list-p${page}-s${search}-c${category}-sc${searchCategory}`;
   const cachedData = cache.list[cacheKey];
 
   if (cachedData && (Date.now() - cachedData.timestamp < cache.CACHE_DURATION)) {
@@ -206,184 +234,285 @@ app.get('/api/movies', async (req, res) => {
   }
 
   try {
-    let url = TARGET_BASE_URL;
-    let isSearch = false;
+    let finalMoviesList = [];
 
     if (search) {
-      // Search suggestion query
-      url = `${TARGET_BASE_URL}/movies/src_data.php?q=${encodeURIComponent(search)}`;
-      isSearch = true;
-    } else if (category) {
-      // Mapping categories
-      if (category === 'bollywood') {
-        url = `${TARGET_BASE_URL}/movies/Hindi/New-${page - 1}.html`;
-      } else if (category === 'hollywood') {
-        url = `${TARGET_BASE_URL}/movies/Hollywood-Dubbed/New-${page - 1}.html`;
-      } else if (category === 'dual-audio') {
-        url = `${TARGET_BASE_URL}/movies/Hindi-Movie/New-${page - 1}.html`;
-      } else if (category === 'web-series' || category === 'tv-show') {
-        url = `${TARGET_BASE_URL}/tv/Hindi-web-series/list-${page}.html`;
-      } else if (category === 'south-indian') {
-        url = `${TARGET_BASE_URL}/movies/south-indian-dubbed/new-${page - 1}.html`;
-      } else if (category === '18') {
-        url = `${TARGET_BASE_URL}/movies/B-Grade-Hindi-Movie/New-${page - 1}.html`;
-      } else {
-        url = `${TARGET_BASE_URL}/movies/${category}/New-${page - 1}.html`;
-      }
-    } else {
-      // Homepage: load base URL for page 1, fallback to Hindi list for page > 1
-      url = page > 1
-        ? `${TARGET_BASE_URL}/movies/Hindi/New-${page - 1}.html`
-        : `${TARGET_BASE_URL}/`;
-    }
+      console.log(`[Multi-Search] Searching for: "${search}" with category filter: "${searchCategory}"`);
+      const searchQueries = [];
 
-    let html = '';
-    if (category !== 'anime') {
-      try {
-        html = await fetchHtml(url);
-      } catch(e) {
-        console.error(`Failed to fetch main category URL: ${url}`, e.message);
-      }
-    }
-    
-    const $ = cheerio.load(html || '');
-    const movies = [];
-
-    // Parse logic supporting various styles
-    // 1. Grid listing format (e.g. subcategory lists)
-    $('.ml-item').each((i, el) => {
-      const item = $(el);
-      const linkEl = item.find('a.ml-mask');
-      const href = linkEl.attr('href');
-      if (!href) return;
-
-      const title = linkEl.find('.mli-info h2').text().trim() || linkEl.attr('title') || '';
-      const imgEl = linkEl.find('img');
-      const poster = imgEl.attr('src') || imgEl.attr('data-original') || imgEl.attr('data-src') || '';
-
-      if (title && href) {
-        const absoluteDetailUrl = href.startsWith('http') ? href : new URL(href, TARGET_BASE_URL).href;
-        const absolutePoster = poster ? (poster.startsWith('http') ? poster : new URL(poster, TARGET_BASE_URL).href) : '';
-        movies.push({
-          title: cleanTitleBranding(title),
-          detailId: Buffer.from(absoluteDetailUrl).toString('base64'),
-          poster: absolutePoster
-        });
-      }
-    });
-
-    // 2. Slider format (Home page layout)
-    if (movies.length === 0) {
-      $('.content-slider a, .item a').each((i, el) => {
-        const linkEl = $(el);
-        const href = linkEl.attr('href');
-        if (!href || (!href.includes('/movie/') && !href.includes('/tv/'))) return;
-
-        const liEl = linkEl.find('li');
-        if (liEl.length === 0) return;
-
-        const title = liEl.find('.titt').text().trim() || liEl.find('h2').text().replace(/\s+/g, ' ').trim() || '';
-        const styleAttr = liEl.attr('style') || '';
-        let poster = '';
-        const bgMatch = styleAttr.match(/url\((.*?)\)/);
-        if (bgMatch) {
-          poster = bgMatch[1].replace(/['"]/g, '').trim();
-        }
-
-        if (title && href) {
-          const absoluteDetailUrl = href.startsWith('http') ? href : new URL(href, TARGET_BASE_URL).href;
-          const absolutePoster = poster ? (poster.startsWith('http') ? poster : new URL(poster, TARGET_BASE_URL).href) : '';
-          movies.push({
-            title: cleanTitleBranding(title),
-            detailId: Buffer.from(absoluteDetailUrl).toString('base64'),
-            poster: absolutePoster
+      // 1. OkJatt Search
+      searchQueries.push((async () => {
+        try {
+          const okjattUrl = `https://okjatt.bond/movies/src_data.php?q=${encodeURIComponent(search)}`;
+          const html = await fetchHtml(okjattUrl);
+          const $ok = cheerio.load(html);
+          const list = [];
+          $ok('.sul li a, li a').each((i, el) => {
+            const linkEl = $ok(el);
+            const href = linkEl.attr('href');
+            const title = linkEl.text().trim();
+            const imgEl = linkEl.find('img');
+            const poster = imgEl.attr('src') || '';
+            if (title && href) {
+              const absoluteDetailUrl = href.startsWith('http') ? href : new URL(href, 'https://okjatt.bond').href;
+              list.push({
+                title: cleanTitleBranding(title),
+                detailId: Buffer.from(absoluteDetailUrl).toString('base64'),
+                poster: poster ? (poster.startsWith('http') ? poster : new URL(poster, 'https://okjatt.bond').href) : ''
+              });
+            }
           });
+          return list;
+        } catch (err) {
+          console.error("OkJatt search failed:", err.message);
+          return [];
         }
-      });
-    }
+      })());
 
-    // 3. Search suggestions format (ul.sul li a)
-    if (movies.length === 0) {
-      $('.sul li a, li a').each((i, el) => {
-        const linkEl = $(el);
-        const href = linkEl.attr('href');
-        if (!href) return;
-
-        const title = linkEl.text().trim();
-        const imgEl = linkEl.find('img');
-        const poster = imgEl.attr('src') || '';
-
-        if (title && href) {
-          const absoluteDetailUrl = href.startsWith('http') ? href : new URL(href, TARGET_BASE_URL).href;
-          const absolutePoster = poster ? (poster.startsWith('http') ? poster : new URL(poster, TARGET_BASE_URL).href) : '';
-          movies.push({
-            title: cleanTitleBranding(title),
-            detailId: Buffer.from(absoluteDetailUrl).toString('base64'),
-            poster: absolutePoster
+      // 2. NetMirror Search
+      searchQueries.push((async () => {
+        try {
+          const netmirrorUrl = `https://api2.imdb4.shop/api/search2/${encodeURIComponent(search)}?page=0`;
+          const response = await axios.get(netmirrorUrl, {
+            headers: { 'User-Agent': 'Mozilla/5.0' },
+            timeout: 8000,
+            httpsAgent: httpsAgent
           });
-        }
-      });
-    }
-
-    // Background Integration: Fetch and merge Vegamovies results
-    let vegaMovies = [];
-    if (search) {
-      try {
-        console.log(`[Vega Scraper] Background search for: "${search}"`);
-        const vegaHtml = await fetchHtml(`https://vegamovie.ss/?s=${encodeURIComponent(search)}`);
-        const $vega = cheerio.load(vegaHtml);
-        $vega('article, .post-item, .blog-post, .post').each((i, el) => {
-          const titleEl = $vega(el).find('h2 a, h3 a, a').first();
-          const href = titleEl.attr('href');
-          const title = titleEl.text().trim() || $vega(el).find('img').attr('alt') || '';
-          const imgEl = $vega(el).find('img').first();
-          let poster = imgEl.attr('src') || imgEl.attr('data-src') || imgEl.attr('data-lazy-src') || '';
-
-          if (href && title) {
-            const absoluteDetailUrl = href.startsWith('http') ? href : new URL(href, 'https://vegamovie.ss').href;
-            const absolutePoster = poster ? (poster.startsWith('http') ? poster : new URL(poster, 'https://vegamovie.ss').href) : '';
-            vegaMovies.push({
-              title: cleanTitleBranding(title),
-              detailId: Buffer.from(absoluteDetailUrl).toString('base64'),
-              poster: absolutePoster
+          const list = [];
+          if (response.data && response.data.results) {
+            response.data.results.forEach(item => {
+              const type = item.media_type || 'movie';
+              const customUrl = `netmirror:${type}:${item.id}`;
+              
+              let poster = item.backdrop_path || '';
+              if (poster) {
+                poster = poster.replace('pbcdnw', 'pacdn');
+              }
+              
+              list.push({
+                title: cleanTitleBranding(item.title),
+                detailId: Buffer.from(customUrl).toString('base64'),
+                poster: poster,
+                media_type: type
+              });
             });
           }
-        });
-      } catch (e) {
-        console.error("Failed to query Vegamovies in background:", e.message);
-      }
-    } else {
-      // Scrape Vegamovies category or home page matching the requested page index
-      try {
-        console.log(`[Vega Scraper] Fetching category "${category || 'home'}" page ${page}`);
-        const vegaItems = await scrapeVegaCategory(category, page);
-        vegaMovies = vegaItems;
-      } catch (e) {
-        console.error("Failed to query Vegamovies category:", e.message);
-      }
-    }
-
-    // Merge lists
-    const finalMoviesList = [...movies, ...vegaMovies];
-
-    // Check pagination
-    let hasNextPage = false;
-    if (isSearch) {
-      hasNextPage = false;
-    } else if (category || page > 1) {
-      const pageNav = $('.pageNav, .pagidiv');
-      if (pageNav.length > 0) {
-        const nextText = pageNav.text();
-        if (nextText.includes('Next') || nextText.includes('»') || nextText.includes('Next»')) {
-          hasNextPage = true;
+          return list;
+        } catch (err) {
+          console.error("NetMirror search failed:", err.message);
+          return [];
         }
-      } else {
-        hasNextPage = finalMoviesList.length >= 10;
+      })());
+
+      // 3. Vegamovies Search
+      searchQueries.push((async () => {
+        try {
+          const vegaHtml = await fetchHtml(`https://vegamovie.ss/?s=${encodeURIComponent(search)}`);
+          const $vega = cheerio.load(vegaHtml);
+          const list = [];
+          $vega('article, .post-item, .blog-post, .post').each((i, el) => {
+            const titleEl = $vega(el).find('h2 a, h3 a, a').first();
+            const href = titleEl.attr('href');
+            const title = titleEl.text().trim() || $vega(el).find('img').attr('alt') || '';
+            const imgEl = $vega(el).find('img').first();
+            let poster = imgEl.attr('src') || imgEl.attr('data-src') || imgEl.attr('data-lazy-src') || '';
+
+            if (href && title) {
+              const absoluteDetailUrl = href.startsWith('http') ? href : new URL(href, 'https://vegamovie.ss').href;
+              list.push({
+                title: cleanTitleBranding(title),
+                detailId: Buffer.from(absoluteDetailUrl).toString('base64'),
+                poster: poster ? (poster.startsWith('http') ? poster : new URL(poster, 'https://vegamovie.ss').href) : ''
+              });
+            }
+          });
+          return list;
+        } catch (err) {
+          console.error("Vegamovies search failed:", err.message);
+          return [];
+        }
+      })());
+
+      const results = await Promise.allSettled(searchQueries);
+      const okjattResults = results[0].status === 'fulfilled' ? results[0].value : [];
+      const netmirrorResults = results[1].status === 'fulfilled' ? results[1].value : [];
+      const vegaResults = results[2].status === 'fulfilled' ? results[2].value : [];
+
+      finalMoviesList = [...okjattResults, ...netmirrorResults, ...vegaResults];
+
+      // Relevance check: ensure only matching items are returned to prevent unrelated suggestions
+      const queryWords = search.toLowerCase().split(/\s+/).filter(w => w.length > 1);
+      if (queryWords.length > 0) {
+        finalMoviesList = finalMoviesList.filter(item => {
+          const titleLower = item.title.toLowerCase();
+          return queryWords.some(word => titleLower.includes(word));
+        });
+      }
+
+      // Filter by search category if not 'all'
+      if (searchCategory !== 'all') {
+        finalMoviesList = finalMoviesList.filter(item => {
+          const itemCat = getCategoryOfItem(item);
+          if (searchCategory === 'movies') {
+            return itemCat === 'movies';
+          }
+          if (searchCategory === 'anime') {
+            return itemCat === 'anime';
+          }
+          if (searchCategory === 'web-series' || searchCategory === 'tv-show') {
+            return itemCat === 'web-series';
+          }
+          return true;
+        });
       }
     } else {
-      hasNextPage = true;
+      // Normal category listing (Home, categories, grids)
+      const listQueries = [];
+
+      // 1. OkJatt category list
+      listQueries.push((async () => {
+        try {
+          let okjattUrl = 'https://okjatt.bond';
+          if (category) {
+            if (category === 'bollywood') {
+              okjattUrl = `https://okjatt.bond/movies/Hindi/New-${page - 1}.html`;
+            } else if (category === 'hollywood') {
+              okjattUrl = `https://okjatt.bond/movies/Hollywood-Dubbed/New-${page - 1}.html`;
+            } else if (category === 'dual-audio') {
+              okjattUrl = `https://okjatt.bond/movies/Hindi-Movie/New-${page - 1}.html`;
+            } else if (category === 'web-series' || category === 'tv-show') {
+              okjattUrl = `https://okjatt.bond/tv/Hindi-web-series/list-${page}.html`;
+            } else if (category === 'south-indian') {
+              okjattUrl = `https://okjatt.bond/movies/south-indian-dubbed/new-${page - 1}.html`;
+            } else if (category === '18') {
+              okjattUrl = `https://okjatt.bond/movies/B-Grade-Hindi-Movie/New-${page - 1}.html`;
+            } else {
+              okjattUrl = `https://okjatt.bond/movies/${category}/New-${page - 1}.html`;
+            }
+          } else {
+            okjattUrl = page > 1 ? `https://okjatt.bond/movies/Hindi/New-${page - 1}.html` : 'https://okjatt.bond/';
+          }
+
+          const html = await fetchHtml(okjattUrl);
+          const $ok = cheerio.load(html);
+          const list = [];
+          
+          $ok('.ml-item').each((i, el) => {
+            const item = $ok(el);
+            const linkEl = item.find('a.ml-mask');
+            const href = linkEl.attr('href');
+            const title = linkEl.find('.mli-info h2').text().trim() || linkEl.attr('title') || '';
+            const imgEl = linkEl.find('img');
+            const poster = imgEl.attr('src') || imgEl.attr('data-original') || imgEl.attr('data-src') || '';
+            if (title && href) {
+              const absoluteDetailUrl = href.startsWith('http') ? href : new URL(href, 'https://okjatt.bond').href;
+              list.push({
+                title: cleanTitleBranding(title),
+                detailId: Buffer.from(absoluteDetailUrl).toString('base64'),
+                poster: poster ? (poster.startsWith('http') ? poster : new URL(poster, 'https://okjatt.bond').href) : ''
+              });
+            }
+          });
+          
+          if (list.length === 0) {
+            $ok('.content-slider a, .item a').each((i, el) => {
+              const linkEl = $ok(el);
+              const href = linkEl.attr('href');
+              if (!href || (!href.includes('/movie/') && !href.includes('/tv/'))) return;
+              const liEl = linkEl.find('li');
+              if (liEl.length === 0) return;
+              const title = liEl.find('.titt').text().trim() || liEl.find('h2').text().replace(/\s+/g, ' ').trim() || '';
+              let poster = '';
+              const styleAttr = liEl.attr('style') || '';
+              const bgMatch = styleAttr.match(/url\((.*?)\)/);
+              if (bgMatch) poster = bgMatch[1].replace(/['"]/g, '').trim();
+              if (title && href) {
+                const absoluteDetailUrl = href.startsWith('http') ? href : new URL(href, 'https://okjatt.bond').href;
+                list.push({
+                  title: cleanTitleBranding(title),
+                  detailId: Buffer.from(absoluteDetailUrl).toString('base64'),
+                  poster: poster ? (poster.startsWith('http') ? poster : new URL(poster, 'https://okjatt.bond').href) : ''
+                });
+              }
+            });
+          }
+          return list;
+        } catch (err) {
+          console.error("OkJatt category fetch failed:", err.message);
+          return [];
+        }
+      })());
+
+      // 2. NetMirror category list
+      listQueries.push((async () => {
+        try {
+          let netmirrorUrl = `https://api2.imdb3.shop/api/movies/filter?page=${page - 1}`;
+          if (category) {
+            if (category === 'bollywood') {
+              netmirrorUrl = `https://api2.imdb3.shop/api/movies/filter?page=${page - 1}&cn=India`;
+            } else if (category === 'hollywood') {
+              netmirrorUrl = `https://api2.imdb3.shop/api/movies/filter?page=${page - 1}&type=1&cn=US`;
+            } else if (category === 'dual-audio') {
+              netmirrorUrl = `https://api2.imdb3.shop/api/movies/filter?page=${page - 1}&cn=India`;
+            } else if (category === 'web-series' || category === 'tv-show') {
+              netmirrorUrl = `https://api2.imdb3.shop/api/movies/filter?page=${page - 1}&type=2`;
+            } else if (category === 'anime') {
+              netmirrorUrl = `https://api2.imdb3.shop/api/movies/filter?page=${page - 1}&genre_ids[]=10&genre_ids[]=6`;
+            } else if (category === 'south-indian') {
+              netmirrorUrl = `https://api2.imdb3.shop/api/movies/filter?page=${page - 1}&cn=India`;
+            } else {
+              netmirrorUrl = `https://api2.imdb3.shop/api/movies/filter?page=${page - 1}`;
+            }
+          }
+          const response = await axios.get(netmirrorUrl, {
+            headers: { 'User-Agent': 'Mozilla/5.0' },
+            timeout: 5000,
+            httpsAgent: httpsAgent
+          });
+          const list = [];
+          if (response.data && response.data.results) {
+            response.data.results.forEach(item => {
+              const type = item.media_type || (netmirrorUrl.includes('type=2') ? 'tv' : 'movie');
+              const customUrl = `netmirror:${type}:${item.id}`;
+              
+              let poster = item.backdrop_path || '';
+              if (poster) {
+                poster = poster.replace('pbcdnw', 'pacdn');
+              }
+              list.push({
+                title: cleanTitleBranding(item.title),
+                detailId: Buffer.from(customUrl).toString('base64'),
+                poster: poster
+              });
+            });
+          }
+          return list;
+        } catch (err) {
+          console.error("NetMirror category fetch failed:", err.message);
+          return [];
+        }
+      })());
+
+      // 3. Vegamovies category list
+      listQueries.push((async () => {
+        try {
+          return await scrapeVegaCategory(category, page);
+        } catch (err) {
+          console.error("Vegamovies category fetch failed:", err.message);
+          return [];
+        }
+      })());
+
+      const results = await Promise.allSettled(listQueries);
+      const okjattList = results[0].status === 'fulfilled' ? results[0].value : [];
+      const netmirrorList = results[1].status === 'fulfilled' ? results[1].value : [];
+      const vegaList = results[2].status === 'fulfilled' ? results[2].value : [];
+
+      finalMoviesList = [...okjattList, ...netmirrorList, ...vegaList];
     }
 
+    // Check pagination next page state
+    const hasNextPage = finalMoviesList.length >= 10;
     const result = { movies: finalMoviesList, page, hasNextPage };
 
     // Cache the result
@@ -412,6 +541,109 @@ app.get('/api/movie-details', async (req, res) => {
   } catch (e) {
     return res.status(400).json({ error: 'Invalid movie ID format' });
   }
+
+  // Intercept NetMirror custom details query
+  const isNetmirror = detailUrl.startsWith('netmirror:');
+  if (isNetmirror) {
+    try {
+      const parts = detailUrl.split(':');
+      const mediaType = parts[1]; // movie or tv
+      const id = parts[2];
+      
+      const apiDetailUrl = `https://api2.imdb3.shop/api/${mediaType}/${id}`;
+      console.log(`[Scraper] Fetching NetMirror details from API: ${apiDetailUrl}`);
+      
+      const response = await axios.get(apiDetailUrl, {
+        headers: { 'User-Agent': 'Mozilla/5.0' },
+        timeout: 8000,
+        httpsAgent: httpsAgent
+      });
+      
+      const item = response.data.results[0];
+      if (!item) {
+        throw new Error('Details not found in NetMirror response');
+      }
+      
+      const title = item.title.trim();
+      const plot = item.dis || 'No synopsis found for this release.';
+      
+      // Technical specifications
+      let infoHtml = `
+        <strong>Title:</strong> ${title}<br>
+        <strong>Release Date:</strong> ${item.release_date || 'N/A'}<br>
+        <strong>Rating:</strong> ${item.vote_average || 'N/A'}/10<br>
+        <strong>Country:</strong> ${item.country || 'N/A'}<br>
+      `;
+      
+      // Backdrop path is the poster/screenshot
+      const screenshots = [];
+      if (item.backdrop_path) {
+        const cleanedBackdrop = item.backdrop_path.replace('pbcdnw', 'pacdn');
+        screenshots.push(cleanedBackdrop);
+      }
+      
+      // Downloads/Streaming list builder
+      const downloads = [];
+      if (item.season && item.season.length > 0) {
+        // TV Show/Web Series
+        item.season.forEach(s => {
+          const seasonNum = s.se;
+          const epCount = s.ep;
+          const allEpStr = s.allEp;
+          
+          let episodesList = [];
+          if (allEpStr) {
+            episodesList = String(allEpStr).split(',').map(Number);
+          } else {
+            episodesList = Array.from({length: epCount}, (_, i) => i + 1);
+          }
+          
+          episodesList.forEach(epNum => {
+            const customStreamUrl = `/api/netmirror-stream?subjectid=${item.subjectid || item.id}&se=${seasonNum}&ep=${epNum}&dp=${encodeURIComponent(item.dp || '')}&title=${encodeURIComponent(title)}`;
+            downloads.push({
+              title: `Episode ${epNum} [Season ${seasonNum}]`,
+              url: customStreamUrl,
+              isEpisode: true
+            });
+          });
+        });
+      } else {
+        // Movie
+        const customStreamUrl = `/api/netmirror-stream?subjectid=${item.subjectid || item.id}&se=0&ep=0&dp=${encodeURIComponent(item.dp || '')}&title=${encodeURIComponent(title)}`;
+        downloads.push({
+          title: `Play Movie (Direct NetMirror Server)`,
+          url: customStreamUrl,
+          isEpisode: false
+        });
+      }
+      
+      const result = {
+        title: cleanTitleBranding(title),
+        infoHtml: cleanTitleBranding(infoHtml),
+        plot: cleanTitleBranding(plot),
+        screenshots: screenshots.slice(0, 8),
+        downloads: downloads.map(d => ({
+          title: cleanTitleBranding(d.title),
+          url: d.url,
+          isEpisode: d.isEpisode
+        })),
+        imdbId: null,
+        streamUrl: downloads.length > 0 ? downloads[0].url : null
+      };
+      
+      // Cache details
+      cache.details[detailUrl] = {
+        timestamp: Date.now(),
+        data: result
+      };
+      
+      return res.json(result);
+    } catch (err) {
+      console.error("NetMirror details query failed:", err.message);
+      return res.status(500).json({ error: 'Failed to fetch NetMirror movie details', details: err.message });
+    }
+  }
+
   const cachedData = cache.details[detailUrl];
   if (cachedData && (Date.now() - cachedData.timestamp < cache.CACHE_DURATION)) {
     return res.json(cachedData.data);
@@ -423,126 +655,130 @@ app.get('/api/movie-details', async (req, res) => {
     // Vegamovies details scraper integration
     const isVega = detailUrl.includes('vegamovie.ss');
     if (isVega) {
-      const title = $('h1').text().trim();
-      
-      // Extract screenshots
-      const screenshots = [];
-      $('img').each((i, el) => {
-        let imgUrl = $(el).attr('src') || $(el).attr('data-src') || $(el).attr('data-lazy-src');
-        if (imgUrl && imgUrl.includes('/uploads/') && imgUrl.toLowerCase().includes('screenshot')) {
-          if (!imgUrl.startsWith('http')) {
-            imgUrl = new URL(imgUrl, detailUrl).href;
-          }
-          screenshots.push(imgUrl);
-        }
-      });
-      
-      // Extract synopsis/plot
-      let plot = '';
-      $('p').each((i, el) => {
-        const txt = $(el).text().trim();
-        if (txt && txt.length > 80 && !txt.includes('vegamovie') && !txt.includes('Prefect Spot') && !txt.includes('G-Drive') && !txt.includes('Quality:')) {
-          plot = txt;
-          return false;
-        }
-      });
-      if (!plot) plot = 'No synopsis found for this release.';
-      
-      // Extract info html specs
-      let infoHtml = '';
-      $('p').each((i, el) => {
-        const txt = $(el).text().trim();
-        if (txt && (txt.includes('Web-Series Name:') || txt.includes('Movie Name:') || txt.includes('Release Year:') || txt.includes('Format:'))) {
-          infoHtml += txt.replace(/\n/g, '<br>') + '<br>';
-        }
-      });
-
-      // Extract downloads
-      const downloads = [];
-      $('.download-links-div').each((i, div) => {
-        $(div).find('a').each((j, el) => {
-          const href = $(el).attr('href');
-          if (!href) return;
-          
-          let label = '';
-          let prev = $(el).closest('h3, div, p').prev();
-          while (prev.length > 0) {
-            const txt = prev.text().trim();
-            if (txt && (txt.includes('480p') || txt.includes('720p') || txt.includes('1080p') || txt.includes('Quality'))) {
-              label = txt;
-              break;
+      try {
+        const title = $('h1').text().trim();
+        
+        // Extract screenshots
+        const screenshots = [];
+        $('img').each((i, el) => {
+          let imgUrl = $(el).attr('src') || $(el).attr('data-src') || $(el).attr('data-lazy-src');
+          if (imgUrl && imgUrl.includes('/uploads/') && imgUrl.toLowerCase().includes('screenshot')) {
+            if (!imgUrl.startsWith('http')) {
+              imgUrl = new URL(imgUrl, detailUrl).href;
             }
-            prev = prev.prev();
+            screenshots.push(imgUrl);
           }
-          
-          if (!label) {
-            label = $(div).find('h3').first().text().trim() || 'Download Link';
-          }
-          
-          const linkText = $(el).text().trim() || 'Download';
-          const title = `${linkText} (${label})`;
-          
-          const titleLower = title.toLowerCase();
-          const isEp = titleLower.includes('episode') || titleLower.includes('ep-') || /\bep\b/i.test(titleLower) || titleLower.includes('ep ') || titleLower.includes('pack') || titleLower.includes('complete') || titleLower.includes('season') || titleLower.includes('s0') || titleLower.includes('s1') || titleLower.includes('s2') || titleLower.includes('s3') || titleLower.includes('s4') || titleLower.includes('s5');
-          
-          const maskedUrl = `/api/download?id=${Buffer.from(href).toString('base64')}`;
-          downloads.push({
-            title: title,
-            url: maskedUrl,
-            isEpisode: isEp
-          });
         });
-      });
-      
-      // Fallback parser if downloads is empty
-      if (downloads.length === 0) {
-        $('a').each((i, el) => {
-          const href = $(el).attr('href');
-          let text = $(el).text().trim().replace(/\s+/g, ' ');
-          if (href && (href.includes('nexdrive') || href.includes('v-cloud') || href.includes('howtoblog') || href.includes('drive') || text.includes('Download'))) {
-            if (!text || text.length < 5 || text.includes('[]')) {
-              text = $(el).attr('title') || 'Download Link';
+        
+        // Extract synopsis/plot
+        let plot = '';
+        $('p').each((i, el) => {
+          const txt = $(el).text().trim();
+          if (txt && txt.length > 80 && !txt.includes('vegamovie') && !txt.includes('Prefect Spot') && !txt.includes('G-Drive') && !txt.includes('Quality:')) {
+            plot = txt;
+            return false;
+          }
+        });
+        if (!plot) plot = 'No synopsis found for this release.';
+        
+        // Extract info html specs
+        let infoHtml = '';
+        $('p').each((i, el) => {
+          const txt = $(el).text().trim();
+          if (txt && (txt.includes('Web-Series Name:') || txt.includes('Movie Name:') || txt.includes('Release Year:') || txt.includes('Format:'))) {
+            infoHtml += txt.replace(/\n/g, '<br>') + '<br>';
+          }
+        });
+
+        // Extract downloads
+        const downloads = [];
+        $('.download-links-div').each((i, div) => {
+          $(div).find('a').each((j, el) => {
+            const href = $(el).attr('href');
+            if (!href) return;
+            
+            let label = '';
+            let prev = $(el).closest('h3, div, p').prev();
+            while (prev.length > 0) {
+              const txt = prev.text().trim();
+              if (txt && (txt.includes('480p') || txt.includes('720p') || txt.includes('1080p') || txt.includes('Quality'))) {
+                label = txt;
+                break;
+              }
+              prev = prev.prev();
             }
-            const titleLower = text.toLowerCase();
+            
+            if (!label) {
+              label = $(div).find('h3').first().text().trim() || 'Download Link';
+            }
+            
+            const linkText = $(el).text().trim() || 'Download';
+            const title = `${linkText} (${label})`;
+            
+            const titleLower = title.toLowerCase();
             const isEp = titleLower.includes('episode') || titleLower.includes('ep-') || /\bep\b/i.test(titleLower) || titleLower.includes('ep ') || titleLower.includes('pack') || titleLower.includes('complete') || titleLower.includes('season') || titleLower.includes('s0') || titleLower.includes('s1') || titleLower.includes('s2') || titleLower.includes('s3') || titleLower.includes('s4') || titleLower.includes('s5');
+            
             const maskedUrl = `/api/download?id=${Buffer.from(href).toString('base64')}`;
             downloads.push({
-              title: text,
+              title: title,
               url: maskedUrl,
               isEpisode: isEp
             });
-          }
+          });
         });
+        
+        // Fallback parser if downloads is empty
+        if (downloads.length === 0) {
+          $('a').each((i, el) => {
+            const href = $(el).attr('href');
+            let text = $(el).text().trim().replace(/\s+/g, ' ');
+            if (href && (href.includes('nexdrive') || href.includes('v-cloud') || href.includes('howtoblog') || href.includes('drive') || text.includes('Download'))) {
+              if (!text || text.length < 5 || text.includes('[]')) {
+                text = $(el).attr('title') || 'Download Link';
+              }
+              const titleLower = text.toLowerCase();
+              const isEp = titleLower.includes('episode') || titleLower.includes('ep-') || /\bep\b/i.test(titleLower) || titleLower.includes('ep ') || titleLower.includes('pack') || titleLower.includes('complete') || titleLower.includes('season') || titleLower.includes('s0') || titleLower.includes('s1') || titleLower.includes('s2') || titleLower.includes('s3') || titleLower.includes('s4') || titleLower.includes('s5');
+              const maskedUrl = `/api/download?id=${Buffer.from(href).toString('base64')}`;
+              downloads.push({
+                title: text,
+                url: maskedUrl,
+                isEpisode: isEp
+              });
+            }
+          });
+        }
+
+        // Resolve IMDb ID
+        let imdbId = null;
+        try {
+          imdbId = await getImdbIdByTitle(title);
+        } catch (err) {
+          console.error('Error fetching IMDb ID for VegaMovie:', err.message);
+        }
+
+        const result = {
+          title: cleanTitleBranding(title),
+          infoHtml: cleanTitleBranding(infoHtml),
+          plot: cleanTitleBranding(plot),
+          screenshots: screenshots.slice(0, 8),
+          downloads: downloads.map(d => ({
+            title: cleanTitleBranding(d.title),
+            url: d.url,
+            isEpisode: d.isEpisode
+          })),
+          imdbId,
+          streamUrl: null
+        };
+
+        cache.details[detailUrl] = {
+          timestamp: Date.now(),
+          data: result
+        };
+
+        return res.json(result);
+      } catch (vegaErr) {
+        console.error("Vegamovies details scraper integration failed:", vegaErr.message);
       }
-
-      // Resolve IMDb ID
-      let imdbId = null;
-      try {
-        imdbId = await getImdbIdByTitle(title);
-      } catch (err) {
-        console.error('Error fetching IMDb ID for VegaMovie:', err.message);
-      }
-
-      const result = {
-        title: cleanTitleBranding(title),
-        infoHtml: cleanTitleBranding(infoHtml),
-        plot: cleanTitleBranding(plot),
-        screenshots: screenshots.slice(0, 8),
-        downloads: downloads.map(d => ({
-          title: cleanTitleBranding(d.title),
-          url: d.url,
-          isEpisode: d.isEpisode
-        })),
-        imdbId,
-        streamUrl: null
-      };
-
-      cache.details[detailUrl] = {
-        timestamp: Date.now(),
-        data: result
-      };
-
-      return res.json(result);
     }
 
     // If it's a TV series intermediate page, resolve it to the complete page URL
@@ -854,7 +1090,7 @@ app.get('/api/download', async (req, res) => {
     }
 
     // Force HTTPS for checkyourlinks.shop as port 80/HTTP times out/fails due to Cloudflare block
-    if (originalUrl.startsWith('http://') && (originalUrl.includes('checkyourlinks') || originalUrl.includes('cdn'))) {
+    if (originalUrl.startsWith('http://') && (originalUrl.includes('checkyourlinks') || originalUrl.includes('cdn') || originalUrl.includes('netmirror'))) {
       originalUrl = originalUrl.replace('http://', 'https://');
     }
 
@@ -876,14 +1112,14 @@ app.get('/api/download', async (req, res) => {
           let directUrl = null;
           $dwd('a').each((i, el) => {
             let href = $dwd(el).attr('href');
-            if (href && !href.includes('.html') && (href.includes('checkyourlinks') || href.includes('cdn') || href.includes('.mp4') || href.includes('download') || href.includes('lnk-lnk'))) {
+            if (href && !href.includes('.html') && (href.includes('checkyourlinks') || href.includes('cdn') || href.includes('netmirror') || href.includes('.mp4') || href.includes('download') || href.includes('lnk-lnk'))) {
               directUrl = href.startsWith('http') ? href : new URL(href, originalUrl).href;
               return false; // break loop
             }
           });
           
           if (directUrl) {
-            if (directUrl.startsWith('http://') && (directUrl.includes('checkyourlinks') || directUrl.includes('cdn'))) {
+            if (directUrl.startsWith('http://') && (directUrl.includes('checkyourlinks') || directUrl.includes('cdn') || directUrl.includes('netmirror'))) {
               directUrl = directUrl.replace('http://', 'https://');
             }
             return res.redirect(`/api/download?id=${Buffer.from(directUrl).toString('base64')}`);
@@ -911,7 +1147,7 @@ app.get('/api/download', async (req, res) => {
 
       res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
 
-      let refererHost = 'okjatthd.bond';
+      let refererHost = 'netmirror.global';
       try {
         const urlObj = new URL(originalUrl);
         refererHost = urlObj.searchParams.get('d') || refererHost;
@@ -960,13 +1196,6 @@ app.get('/api/stream-play', async (req, res) => {
     return res.status(400).send('Invalid stream request');
   }
 
-  const controller = new AbortController();
-  
-  // Clean up and abort axios request if the client disconnects
-  req.on('close', () => {
-    controller.abort();
-  });
-
   try {
     let originalUrl = Buffer.from(maskedId, 'base64').toString('utf8');
     originalUrl = resolveOkJattUrl(originalUrl);
@@ -976,105 +1205,56 @@ app.get('/api/stream-play', async (req, res) => {
       originalUrl = new URL(originalUrl, TARGET_BASE_URL).href;
     }
 
+    // Force HTTPS for checkyourlinks.shop as port 80/HTTP times out/fails due to Cloudflare block
+    if (originalUrl.startsWith('http://') && (originalUrl.includes('checkyourlinks') || originalUrl.includes('cdn') || originalUrl.includes('netmirror'))) {
+      originalUrl = originalUrl.replace('http://', 'https://');
+    }
+
     if (originalUrl.startsWith('http://') || originalUrl.startsWith('https://')) {
-      let refererHost = 'okjatthd.bond';
-      try {
-        const urlObj = new URL(originalUrl);
-        refererHost = urlObj.searchParams.get('d') || refererHost;
-      } catch (e) {}
-
-      const requestHeaders = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-        'Referer': `https://${refererHost}/`
-      };
-
-      // Forward range header if requested by client (critical for seeking and mobile players)
-      if (req.headers.range) {
-        requestHeaders['Range'] = req.headers.range;
-      }
-
-      let currentUrl = originalUrl;
-      let redirectCount = 0;
-      let response = null;
-
-      // Handle redirects manually to preserve the Referer header
-      while (redirectCount < 5) {
-        try {
-          response = await axios({
-            method: 'get',
-            url: currentUrl,
-            responseType: 'stream',
-            headers: requestHeaders,
-            timeout: 25000,
-            httpsAgent: httpsAgent,
-            maxRedirects: 0,
-            validateStatus: status => (status >= 200 && status < 300) || status === 301 || status === 302 || status === 307 || status === 308,
-            signal: controller.signal
-          });
-
-          // Check for redirect status codes
-          if ([301, 302, 307, 308].includes(response.status)) {
-            let redirectUrl = response.headers.location;
-            if (!redirectUrl) {
-              throw new Error('Redirect status received without Location header');
-            }
-            if (!redirectUrl.startsWith('http')) {
-              redirectUrl = new URL(redirectUrl, currentUrl).href;
-            }
-            
-            currentUrl = redirectUrl;
-            redirectCount++;
-
-            // Update referer host for the new redirect URL
-            try {
-              const urlObj = new URL(currentUrl);
-              requestHeaders['Referer'] = `https://${urlObj.hostname}/`;
-            } catch (e) {}
-
-            continue;
-          }
-
-          break; // Got a valid non-redirect response
-        } catch (err) {
-          throw err;
-        }
-      }
-
-      if (!response) {
-        throw new Error('No response received from target stream server');
-      }
-
-      // Set headers from the target stream response
-      if (response.headers['content-type']) {
-        res.setHeader('Content-Type', response.headers['content-type']);
-      }
-      if (response.headers['content-range']) {
-        res.setHeader('Content-Range', response.headers['content-range']);
-      }
-      if (response.headers['accept-ranges']) {
-        res.setHeader('Accept-Ranges', response.headers['accept-ranges']);
-      } else {
-        res.setHeader('Accept-Ranges', 'bytes');
-      }
-      if (response.headers['content-length']) {
-        res.setHeader('Content-Length', response.headers['content-length']);
-      }
-
-      res.status(req.headers.range ? 206 : 200);
-      response.data.pipe(res);
+      // Redirect directly to original stream CDN link so that browser loads video instantly and fast
+      return res.redirect(originalUrl);
     } else {
       res.status(400).send('Malformed stream URL');
     }
   } catch (error) {
-    controller.abort();
-    if (error.name === 'CanceledError' || error.name === 'AbortError') {
-      // Request aborted by client, no need to log or redirect
-      return;
-    }
-    console.error('Streaming proxy error (failing fast):', error.message);
+    console.error('Streaming redirect error:', error.message);
     if (!res.headersSent) {
-      res.status(500).send('Streaming proxy error: ' + error.message);
+      res.status(500).send('Streaming redirect error: ' + error.message);
     }
+  }
+});
+
+// 5. API: NetMirror signed stream URL generator
+app.get('/api/netmirror-stream', async (req, res) => {
+  const { subjectid, se, ep, dp, title } = req.query;
+  if (!subjectid) {
+    return res.status(400).json({ error: 'Missing subjectid' });
+  }
+
+  try {
+    const timestamp = Math.floor(Date.now() / 1000);
+    const signature = crypto.createHmac('sha256', 'net###@@sss').update(String(timestamp)).digest('hex');
+    
+    function z(ge) {
+      const enc = new TextEncoder();
+      const Ye = enc.encode(ge);
+      let binary = '';
+      const len = Ye.byteLength;
+      for (let i = 0; i < len; i++) {
+        binary += String.fromCharCode(Ye[i]);
+      }
+      return binary;
+    }
+    
+    const na = encodeURIComponent(Buffer.from(z(title || ''), 'binary').toString('base64'));
+    
+    let playUrl = `https://speed.watch22.shop/play/watchbox.php?id=${subjectid}&se=${se || 0}&ep=${ep || 0}&dp=${encodeURIComponent(dp || '')}&na=${na}`;
+    playUrl += `&ts=${timestamp}&sig=${signature}&exten=false`;
+    
+    return res.json({ iframeUrl: playUrl });
+  } catch (err) {
+    console.error("Failed to generate NetMirror stream URL:", err.message);
+    res.status(500).json({ error: 'Failed to generate NetMirror stream signature' });
   }
 });
 
